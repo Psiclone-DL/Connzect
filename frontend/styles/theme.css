@@ -1,0 +1,11 @@
+:root {
+  --bg-main: #0d1312;
+  --bg-grad-top: #1a2b29;
+  --bg-grad-bottom: #2f0f1c;
+  --panel: rgba(22, 37, 36, 0.72);
+  --text-main: #e7efed;
+  --text-muted: #9cb4ae;
+  --accent: #77213a;
+  --accent-soft: #5d1428;
+  --stroke: rgba(255, 255, 255, 0.08);
+}
