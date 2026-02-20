@@ -10,6 +10,7 @@ const AUTO_UPDATES_ENABLED =
   app.isPackaged && process.platform === 'win32' && process.env.CONNZECT_DISABLE_AUTO_UPDATES !== '1';
 
 let mainWindow = null;
+let installingUpdate = false;
 
 const log = (...values) => {
   // eslint-disable-next-line no-console
@@ -97,7 +98,8 @@ const setupAutoUpdates = () => {
   }
 
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
 
   autoUpdater.on('checking-for-update', () => {
     log('Checking for updates...');
@@ -105,13 +107,6 @@ const setupAutoUpdates = () => {
 
   autoUpdater.on('update-available', (info) => {
     log(`Update available: ${info.version}`);
-    if (mainWindow) {
-      dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Connzect Update',
-        message: `Se descarca update-ul ${info.version} in fundal.`
-      });
-    }
   });
 
   autoUpdater.on('update-not-available', () => {
@@ -127,27 +122,20 @@ const setupAutoUpdates = () => {
     log(`Update download progress: ${percent}%`);
   });
 
-  autoUpdater.on('update-downloaded', async (info) => {
+  autoUpdater.on('update-downloaded', (info) => {
     log(`Update downloaded: ${info.version}`);
 
-    if (!mainWindow) {
-      autoUpdater.quitAndInstall();
+    if (installingUpdate) {
+      log('Update install already in progress. Skipping duplicate trigger.');
       return;
     }
 
-    const result = await dialog.showMessageBox(mainWindow, {
-      type: 'question',
-      buttons: ['Restart now', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
-      title: 'Update ready',
-      message: `Versiunea ${info.version} este gata de instalare.`,
-      detail: 'Apasa "Restart now" pentru instalare imediata.'
-    });
+    installingUpdate = true;
+    log('Installing update in background and restarting app...');
 
-    if (result.response === 0) {
-      setImmediate(() => autoUpdater.quitAndInstall());
-    }
+    setTimeout(() => {
+      autoUpdater.quitAndInstall(false, true);
+    }, 1200);
   });
 
   log('Using GitHub Releases auto-update provider.');
