@@ -7,5 +7,3 @@ node_modules
 backend/uploads/*
 !backend/uploads/.gitkeep
 desktop-dist
-updates/win/*
-!updates/win/.gitkeep

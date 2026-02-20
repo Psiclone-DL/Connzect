@@ -17,8 +17,7 @@
     "desktop": "electron .",
     "dev:desktop": "cross-env CONNZECT_WEB_URL=http://127.0.0.1:3000 CONNZECT_DEVTOOLS=1 electron .",
     "dist:win": "electron-builder --win nsis",
-    "prepare:update-feed": "node scripts/prepare-update-feed.mjs",
-    "dist:win:update-feed": "npm run dist:win && npm run prepare:update-feed"
+    "dist:win:publish": "electron-builder --win nsis --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.8.3"
@@ -39,8 +38,14 @@
     },
     "files": [
       "electron/**/*",
-      "scripts/**/*",
       "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Psiclone-DL",
+        "repo": "Connzect"
+      }
     ],
     "win": {
       "target": [

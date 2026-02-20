@@ -166,13 +166,11 @@ Output:
 
 - Override target URL with environment variable:
   - `CONNZECT_WEB_URL=http://your-vps:3002`
-- Override update feed URL (if needed):
-  - `CONNZECT_UPDATE_FEED_URL=http://your-vps:3002/updates/win`
-- Auto-update is enabled for packaged Windows app.
+- Auto-update is enabled for packaged Windows app (GitHub Releases).
 
 ### Auto-update Release Flow
 
-Desktop updates are distributed from your VPS update feed (`/updates/win`), works with private GitHub repo.
+Desktop updates are distributed from GitHub Releases (repo public).
 
 1. Increase app version in root:
 
@@ -180,27 +178,19 @@ Desktop updates are distributed from your VPS update feed (`/updates/win`), work
 npm version patch
 ```
 
-2. Build Windows installer + update feed artifacts:
+2. Publish installer + update metadata to GitHub:
 
 ```bash
-npm run dist:win:update-feed
+# Windows PowerShell
+$env:GH_TOKEN="your_github_token"
+npm run dist:win:publish
 ```
 
-This prepares:
-- `updates/win/latest.yml`
-- `updates/win/*.exe`
-- `updates/win/*.blockmap`
-
-3. Upload `updates/win/*` to VPS path:
+3. Push commit and tag:
 
 ```bash
-scp updates/win/* root@5.75.169.93:/root/Connzect/updates/win/
-```
-
-4. Reload nginx container:
-
-```bash
-docker compose restart nginx
+git push
+git push --tags
 ```
 
 When users open the app, it checks for updates at startup and every 30 minutes, downloads automatically, then asks for restart.
