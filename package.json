@@ -44,7 +44,8 @@
       {
         "provider": "github",
         "owner": "Psiclone-DL",
-        "repo": "Connzect"
+        "repo": "Connzect",
+        "releaseType": "release"
       }
     ],
     "win": {
