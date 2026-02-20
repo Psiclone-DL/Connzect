@@ -2,7 +2,8 @@ const { app, BrowserWindow, dialog } = require('electron');
 const http = require('http');
 const https = require('https');
 
-const WEB_URL = process.env.CONNZECT_WEB_URL || 'https://connzect.ro';
+const DEFAULT_URLS = ['http://5.75.169.93:3002', 'http://5.75.169.93'];
+const CONFIGURED_URL = process.env.CONNZECT_WEB_URL;
 const OPEN_DEVTOOLS = process.env.CONNZECT_DEVTOOLS === '1';
 
 const waitForServer = (url, timeoutMs = 60_000) =>
@@ -30,10 +31,25 @@ const waitForServer = (url, timeoutMs = 60_000) =>
     tryConnect();
   });
 
+const resolveWebUrl = async () => {
+  const candidates = CONFIGURED_URL ? [CONFIGURED_URL] : DEFAULT_URLS;
+  const tried = [];
+
+  for (const candidate of candidates) {
+    tried.push(candidate);
+    try {
+      await waitForServer(candidate, 15_000);
+      return candidate;
+    } catch {
+      // continue with next candidate
+    }
+  }
+
+  throw new Error(`Cannot reach any web endpoint. Tried: ${tried.join(', ')}`);
+};
+
 const createMainWindow = async () => {
-  await waitForServer(WEB_URL).catch(() => {
-    throw new Error(`Cannot reach ${WEB_URL}. Check VPS/domain and internet connection.`);
-  });
+  const webUrl = await resolveWebUrl();
 
   const win = new BrowserWindow({
     width: 1480,
@@ -49,7 +65,7 @@ const createMainWindow = async () => {
     }
   });
 
-  await win.loadURL(WEB_URL);
+  await win.loadURL(webUrl);
 
   if (OPEN_DEVTOOLS) {
     win.webContents.openDevTools({ mode: 'detach' });
