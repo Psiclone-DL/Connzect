@@ -128,13 +128,13 @@ Frontend runs on `http://localhost:3000`.
 
 ## Desktop (.exe) Build
 
-Connzect includes Electron packaging so you can generate a Windows installer.
+Connzect desktop is a thin Electron client that opens the VPS web app.
 
 ### Prerequisites (Windows PC)
 
 - Node.js 20+
-- PostgreSQL running (local or remote)
-- Project dependencies installed in root + workspaces
+- Access to the VPS URL (default in app: `http://5.75.169.93:3002`)
+- Project dependencies installed in root
 
 ### 1) Install dependencies
 
@@ -142,20 +142,9 @@ From project root:
 
 ```bash
 npm install
-npm install --workspaces
 ```
 
-### 2) Generate backend Prisma client and run migrations
-
-```bash
-cd backend
-copy .env.example .env
-npx prisma generate
-npx prisma migrate deploy
-cd ..
-```
-
-### 3) Build Windows installer
+### 2) Build Windows installer
 
 ```bash
 npm run dist:win
@@ -168,20 +157,43 @@ Output:
 ### Useful desktop scripts
 
 - `npm run dev:desktop`:
-  - Runs backend + frontend dev servers
-  - Launches Electron shell pointing to local dev app
+  - Launches Electron against `http://127.0.0.1:3000` (for local frontend dev)
 
 - `npm run desktop`:
-  - Builds backend/frontend desktop artifacts
-  - Launches Electron in local production mode
+  - Launches Electron with default VPS URL
 
-### Runtime notes
+### Runtime notes (Desktop)
 
-- Desktop app starts local frontend (`127.0.0.1:3000`) and backend (`127.0.0.1:4000`) from built artifacts.
-- Backend still requires a valid PostgreSQL `DATABASE_URL`.
-- Set production secrets via environment variables on your PC:
-  - `JWT_ACCESS_SECRET`
-  - `JWT_REFRESH_SECRET`
+- Override target URL with environment variable:
+  - `CONNZECT_WEB_URL=http://your-vps:3002`
+- Auto-update is enabled for packaged Windows app.
+
+### Auto-update Release Flow
+
+Desktop updates are distributed from GitHub Releases.
+
+1. Increase app version in root:
+
+```bash
+npm version patch
+```
+
+2. Publish installer + update metadata to GitHub:
+
+```bash
+# Windows PowerShell
+$env:GH_TOKEN="your_github_token"
+npm run dist:win:publish
+```
+
+3. Push commit and tag:
+
+```bash
+git push
+git push --tags
+```
+
+When users open the app, it checks for updates at startup and every 30 minutes, downloads automatically, then asks for restart.
 
 ## API Overview
 
