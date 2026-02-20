@@ -4,7 +4,9 @@ const https = require('https');
 const { autoUpdater } = require('electron-updater');
 
 const DEFAULT_URLS = ['http://5.75.169.93:3002', 'http://5.75.169.93'];
+const DEFAULT_UPDATE_FEED_URLS = ['http://5.75.169.93:3002/updates/win'];
 const CONFIGURED_URL = process.env.CONNZECT_WEB_URL;
+const CONFIGURED_UPDATE_FEED_URL = process.env.CONNZECT_UPDATE_FEED_URL;
 const OPEN_DEVTOOLS = process.env.CONNZECT_DEVTOOLS === '1';
 const AUTO_UPDATES_ENABLED =
   app.isPackaged && process.platform === 'win32' && process.env.CONNZECT_DISABLE_AUTO_UPDATES !== '1';
@@ -41,6 +43,8 @@ const waitForServer = (url, timeoutMs = 60_000) =>
     tryConnect();
   });
 
+const withTrimmedTrailingSlash = (value) => value.replace(/\/+$/, '');
+
 const resolveWebUrl = async () => {
   const candidates = CONFIGURED_URL ? [CONFIGURED_URL] : DEFAULT_URLS;
   const tried = [];
@@ -56,6 +60,25 @@ const resolveWebUrl = async () => {
   }
 
   throw new Error(`Cannot reach any web endpoint. Tried: ${tried.join(', ')}`);
+};
+
+const resolveUpdateFeedUrl = async () => {
+  const candidates = (CONFIGURED_UPDATE_FEED_URL ? [CONFIGURED_UPDATE_FEED_URL] : DEFAULT_UPDATE_FEED_URLS).map(
+    withTrimmedTrailingSlash
+  );
+  const tried = [];
+
+  for (const candidate of candidates) {
+    tried.push(candidate);
+    try {
+      await waitForServer(`${candidate}/latest.yml`, 15_000);
+      return candidate;
+    } catch {
+      // continue with next candidate
+    }
+  }
+
+  throw new Error(`Cannot reach any update feed endpoint. Tried: ${tried.join(', ')}`);
 };
 
 const createMainWindow = async () => {
@@ -150,14 +173,31 @@ const setupAutoUpdates = () => {
     }
   });
 
-  const checkUpdates = () => {
-    autoUpdater.checkForUpdates().catch((error) => {
-      log('Failed checking updates:', error?.message || String(error));
-    });
+  const bootstrap = async () => {
+    try {
+      const feedUrl = await resolveUpdateFeedUrl();
+      autoUpdater.setFeedURL({
+        provider: 'generic',
+        url: feedUrl
+      });
+      log(`Using update feed: ${feedUrl}`);
+
+      const checkUpdates = () => {
+        autoUpdater.checkForUpdates().catch((error) => {
+          log('Failed checking updates:', error?.message || String(error));
+        });
+      };
+
+      setTimeout(checkUpdates, 5000);
+      setInterval(checkUpdates, 30 * 60 * 1000);
+    } catch (error) {
+      log('Auto-update disabled, feed unreachable:', error instanceof Error ? error.message : String(error));
+    }
   };
 
-  setTimeout(checkUpdates, 5000);
-  setInterval(checkUpdates, 30 * 60 * 1000);
+  bootstrap().catch((error) => {
+    log('Auto-update bootstrap failed:', error instanceof Error ? error.message : String(error));
+  });
 };
 
 app.on('window-all-closed', () => {
