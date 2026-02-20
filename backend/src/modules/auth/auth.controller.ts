@@ -2,12 +2,17 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import * as authService from './auth.service';
 
-const refreshCookieOptions = {
-  httpOnly: true,
-  sameSite: 'lax' as const,
-  secure: process.env.NODE_ENV === 'production',
-  path: '/api/auth',
-  maxAge: 7 * 24 * 60 * 60 * 1000
+const buildRefreshCookieOptions = (req: Request) => {
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  const isSecureRequest = req.secure || forwardedProto === 'https';
+
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: isSecureRequest,
+    path: '/api/auth',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  };
 };
 
 export const register = async (req: Request, res: Response): Promise<void> => {
@@ -20,7 +25,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body;
   const result = await authService.login(email.toLowerCase(), password);
 
-  res.cookie('refreshToken', result.refreshToken, refreshCookieOptions);
+  res.cookie('refreshToken', result.refreshToken, buildRefreshCookieOptions(req));
   res.status(StatusCodes.OK).json({
     accessToken: result.accessToken,
     user: result.user
@@ -36,7 +41,7 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
   }
 
   const result = await authService.refreshSession(refreshToken);
-  res.cookie('refreshToken', result.refreshToken, refreshCookieOptions);
+  res.cookie('refreshToken', result.refreshToken, buildRefreshCookieOptions(req));
 
   res.status(StatusCodes.OK).json({
     accessToken: result.accessToken,
@@ -51,7 +56,7 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
   }
 
   res.clearCookie('refreshToken', {
-    ...refreshCookieOptions,
+    ...buildRefreshCookieOptions(req),
     maxAge: undefined
   });
 

@@ -6,6 +6,11 @@ import { routeParam } from '../../utils/params';
 import { Permission } from '../../utils/permissions';
 import { requireServerPermission } from './server-access';
 
+const serializeRole = <T extends { permissions: bigint }>(role: T) => ({
+  ...role,
+  permissions: role.permissions.toString()
+});
+
 export const createServer = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
     throw new HttpError(401, 'Unauthorized');
@@ -122,11 +127,13 @@ export const getServer = async (req: Request, res: Response): Promise<void> => {
 
   res.status(StatusCodes.OK).json({
     ...server,
-    roles: server.roles.map((role) => ({
-      ...role,
-      permissions: role.permissions.toString(),
-      allowBits: undefined,
-      denyBits: undefined
+    roles: server.roles.map((role) => serializeRole(role)),
+    members: server.members.map((member) => ({
+      ...member,
+      memberRoles: member.memberRoles.map((memberRole) => ({
+        ...memberRole,
+        role: serializeRole(memberRole.role)
+      }))
     }))
   });
 };

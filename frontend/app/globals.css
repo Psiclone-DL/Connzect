@@ -13,7 +13,7 @@ body {
   margin: 0;
   min-height: 100%;
   background: radial-gradient(circle at top left, var(--bg-grad-top), transparent 45%),
-    radial-gradient(circle at 85% 20%, #3a1222, transparent 35%),
+    radial-gradient(circle at 85% 20%, #11392f, transparent 35%),
     linear-gradient(155deg, var(--bg-main), var(--bg-grad-bottom));
   color: var(--text-main);
   font-family: 'Manrope', 'Segoe UI', sans-serif;
@@ -24,7 +24,7 @@ body {
 }
 
 ::selection {
-  background: rgba(138, 45, 70, 0.4);
+  background: rgba(46, 154, 129, 0.38);
 }
 
 .glass {

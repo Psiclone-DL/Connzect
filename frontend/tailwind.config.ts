@@ -11,14 +11,14 @@ const config: Config = {
       colors: {
         mintBlack: '#0f1716',
         mintBlackSoft: '#14211f',
-        burgundy: '#5d1428',
-        burgundySoft: '#77213a',
+        burgundy: '#1f7a66',
+        burgundySoft: '#2a8f76',
         card: '#162524cc',
         frosted: '#ffffff0f'
       },
       boxShadow: {
         soft: '0 16px 40px rgba(0, 0, 0, 0.25)',
-        glow: '0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 30px rgba(119, 33, 58, 0.25)'
+        glow: '0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 30px rgba(42, 143, 118, 0.28)'
       },
       animation: {
         rise: 'rise 0.4s ease-out',

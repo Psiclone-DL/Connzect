@@ -1,2 +1,4 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
-export const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL ?? 'http://localhost:4000';
+const browserOrigin = typeof window === 'undefined' ? '' : window.location.origin;
+
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+export const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || browserOrigin;

@@ -1,0 +1,16 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+RUN npm ci --workspace backend
+
+COPY backend backend
+
+WORKDIR /app/backend
+
+EXPOSE 4000
+
+CMD ["sh", "-c", "npx prisma generate && (npx prisma migrate deploy || true) && npx prisma db push && npm run start"]
