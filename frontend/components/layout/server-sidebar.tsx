@@ -11,22 +11,30 @@ interface ServerSidebarProps {
 
 export const ServerSidebar = ({ servers, activeServerId }: ServerSidebarProps) => {
   return (
-    <aside className="glass w-full rounded-2xl p-3 md:w-64">
-      <p className="mb-3 text-xs uppercase tracking-[0.2em] text-slate-400">Servers</p>
-      <div className="space-y-2">
+    <aside className="glass soft-scroll h-[calc(100vh-2rem)] w-[5.5rem] overflow-y-auto rounded-2xl p-2">
+      <div className="flex flex-col items-center gap-2">
         {servers.map((server) => (
           <Link
             key={server.id}
             href={`/server/${server.id}`}
+            title={server.name}
             className={cn(
-              'flex items-center gap-3 rounded-xl border border-transparent px-3 py-2 text-sm transition hover:border-white/20 hover:bg-white/5',
-              activeServerId === server.id ? 'border-burgundySoft/50 bg-white/5' : ''
+              'group relative flex h-14 w-14 items-center justify-center rounded-2xl border border-transparent text-xs font-semibold uppercase tracking-wide transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/5',
+              activeServerId === server.id ? 'border-burgundySoft/60 bg-burgundySoft/20 shadow-glow' : 'bg-black/15'
             )}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-burgundySoft/80 text-xs font-bold uppercase">
-              {server.name.slice(0, 2)}
-            </div>
-            <span className="truncate">{server.name}</span>
+            {server.iconUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={server.iconUrl} alt={server.name} className="h-10 w-10 rounded-xl object-cover" />
+            ) : (
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-burgundySoft/80 text-[11px] font-bold">
+                {server.name.slice(0, 2)}
+              </span>
+            )}
+
+            <span className="pointer-events-none absolute left-[calc(100%+0.7rem)] top-1/2 z-20 -translate-y-1/2 translate-x-1 whitespace-nowrap rounded-lg border border-white/15 bg-mintBlackSoft px-2 py-1 text-xs normal-case text-slate-200 opacity-0 shadow-soft transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100">
+              {server.name}
+            </span>
           </Link>
         ))}
       </div>

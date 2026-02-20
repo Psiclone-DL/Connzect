@@ -12,8 +12,8 @@ interface ChannelListProps {
 
 export const ChannelList = ({ serverId, channels, activeChannelId }: ChannelListProps) => {
   return (
-    <section className="glass rounded-2xl p-3">
-      <p className="mb-3 text-xs uppercase tracking-[0.2em] text-slate-400">Channels</p>
+    <section className="glass soft-scroll h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl p-3">
+      <p className="mb-3 px-1 text-xs uppercase tracking-[0.2em] text-slate-400">Channels</p>
       <div className="space-y-2">
         {channels.map((channel) => (
           <Link

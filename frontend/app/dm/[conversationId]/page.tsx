@@ -59,7 +59,13 @@ export default function DmConversationPage() {
   useEffect(() => {
     if (!socket || !conversationId) return;
 
-    socket.emit('dm:join', { conversationId });
+    const joinConversation = () => {
+      socket.emit('dm:join', { conversationId });
+    };
+
+    if (socket.connected) {
+      joinConversation();
+    }
 
     const onMessage = (message: DirectMessage) => {
       if (message.conversationId !== conversationId) return;
@@ -89,12 +95,14 @@ export default function DmConversationPage() {
     socket.on('dm:message:new', onMessage);
     socket.on('dm:message:updated', onMessageUpdated);
     socket.on('error:event', onError);
+    socket.on('connect', joinConversation);
 
     return () => {
       socket.emit('dm:leave', { conversationId });
       socket.off('dm:message:new', onMessage);
       socket.off('dm:message:updated', onMessageUpdated);
       socket.off('error:event', onError);
+      socket.off('connect', joinConversation);
     };
   }, [conversationId, socket, threadParent]);
 
@@ -131,7 +139,7 @@ export default function DmConversationPage() {
   const sendMessage = async (content: string, parentMessageId?: string) => {
     if (!conversationId) return;
 
-    if (!socket) {
+    if (!socket?.connected) {
       const created = await authRequest<DirectMessage>(`/dm/conversations/${conversationId}/messages`, {
         method: 'POST',
         body: JSON.stringify({ content, parentMessageId })
@@ -146,7 +154,7 @@ export default function DmConversationPage() {
   const editMessage = async (messageId: string, content: string) => {
     if (!conversationId) return;
 
-    if (!socket) {
+    if (!socket?.connected) {
       const updated = await authRequest<DirectMessage>(`/dm/conversations/${conversationId}/messages/${messageId}`, {
         method: 'PATCH',
         body: JSON.stringify({ content })
@@ -161,7 +169,7 @@ export default function DmConversationPage() {
   const deleteMessage = async (messageId: string) => {
     if (!conversationId) return;
 
-    if (!socket) {
+    if (!socket?.connected) {
       const deleted = await authRequest<DirectMessage>(`/dm/conversations/${conversationId}/messages/${messageId}`, {
         method: 'DELETE'
       });

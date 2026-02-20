@@ -26,14 +26,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const refreshPromiseRef = useRef<Promise<void> | null>(null);
+  const refreshPromiseRef = useRef<Promise<string> | null>(null);
 
   const applyAuth = useCallback((payload: AuthPayload) => {
     setUser(payload.user);
     setAccessToken(payload.accessToken);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<string> => {
     if (refreshPromiseRef.current) {
       return refreshPromiseRef.current;
     }
@@ -43,6 +43,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         method: 'POST'
       });
       applyAuth(payload);
+      return payload.accessToken;
     })()
       .catch((error) => {
         setUser(null);
@@ -91,10 +92,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const authRequest = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<T> => {
-      const makeRequest = async (): Promise<T> => {
+      const makeRequest = async (tokenOverride?: string): Promise<T> => {
+        const token = tokenOverride ?? accessToken;
         const headers = {
           ...(init?.headers ?? {}),
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
         };
 
         return request<T>(path, {
@@ -107,8 +109,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return await makeRequest();
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
-          await refresh();
-          return makeRequest();
+          const refreshedAccessToken = await refresh();
+          return makeRequest(refreshedAccessToken);
         }
 
         throw error;
