@@ -97,6 +97,19 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     }
   }, [activeServerId, servers]);
 
+  useEffect(() => {
+    if (!activeServerId) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveServerId(null);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeServerId]);
+
   const activeServer = useMemo(
     () => (activeServerId ? servers.find((server) => server.id === activeServerId) ?? null : null),
     [activeServerId, servers]
@@ -273,83 +286,47 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               <section className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-200">{error}</section>
             ) : null}
 
-            {activeServer ? (
-              <section className={cn(styles.surfaceStrong, styles.fadeIn, 'rounded-3xl border p-6')}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Server Widget</p>
-                    <h2 className="mt-2 text-3xl font-semibold text-white">{activeServer.name}</h2>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="soft" onClick={() => openServer(activeServer.id)}>
-                      Enter Server
-                    </Button>
-                    <Button variant="soft" onClick={() => setActiveServerId(null)}>
-                      Close Widget
-                    </Button>
-                  </div>
+            <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Servers</p>
+                  <h2 className="mt-2 text-2xl font-semibold text-white">Select a server widget</h2>
                 </div>
+                <span className="rounded-xl border border-emerald-100/20 bg-emerald-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-emerald-50">
+                  {servers.length} servers
+                </span>
+              </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Server Name</p>
-                    <p className="mt-2 text-lg font-semibold text-white">{activeServer.name}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Server ID</p>
-                    <p className="mt-2 truncate text-sm text-slate-200">{activeServer.id}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Created</p>
-                    <p className="mt-2 text-sm text-slate-200">
-                      {new Date(activeServer.createdAt).toLocaleDateString('ro-RO', { year: 'numeric', month: 'long', day: 'numeric' })}
-                    </p>
-                  </div>
-                </div>
-              </section>
-            ) : (
-              <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Servers</p>
-                    <h2 className="mt-2 text-2xl font-semibold text-white">Select a server widget</h2>
-                  </div>
-                  <span className="rounded-xl border border-emerald-100/20 bg-emerald-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-emerald-50">
-                    {servers.length} servers
-                  </span>
-                </div>
-
-                {servers.length > 0 ? (
-                  <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {servers.map((server) => (
-                      <button
-                        key={server.id}
-                        type="button"
-                        onClick={() => openServerWidget(server.id)}
-                        className={cn(
-                          styles.cardLift,
-                          'rounded-2xl border border-white/10 bg-black/15 p-4 text-left transition'
-                        )}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-100/20 bg-emerald-300/10 text-xs font-semibold tracking-[0.14em] text-emerald-100">
-                            {getServerInitials(server.name)}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-white">{server.name}</p>
-                            <p className="mt-1 text-xs text-slate-300">Open server widget</p>
-                          </div>
+              {servers.length > 0 ? (
+                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {servers.map((server) => (
+                    <button
+                      key={server.id}
+                      type="button"
+                      onClick={() => openServerWidget(server.id)}
+                      className={cn(
+                        styles.cardLift,
+                        'rounded-2xl border border-white/10 bg-black/15 p-4 text-left transition'
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-100/20 bg-emerald-300/10 text-xs font-semibold tracking-[0.14em] text-emerald-100">
+                          {getServerInitials(server.name)}
                         </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-6 rounded-2xl border border-dashed border-white/20 p-5 text-sm text-slate-300">
-                    No servers available. Create or join one from Workspace Actions.
-                  </div>
-                )}
-              </section>
-            )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-white">{server.name}</p>
+                          <p className="mt-1 text-xs text-slate-300">Open server widget</p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-6 rounded-2xl border border-dashed border-white/20 p-5 text-sm text-slate-300">
+                  No servers available. Create or join one from Workspace Actions.
+                </div>
+              )}
+            </section>
 
             {user && actionsOpen ? (
               <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
@@ -398,6 +375,62 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             ) : null}
           </main>
         </div>
+
+        {activeServer ? (
+          <div
+            className="fixed inset-0 z-[70] bg-black/70 px-4 pb-6 pt-24 backdrop-blur-sm md:px-8"
+            onClick={() => setActiveServerId(null)}
+          >
+            <div className="mx-auto flex w-full max-w-[1240px] justify-center">
+              <section
+                className={cn(styles.surfaceStrong, styles.fadeIn, 'w-full rounded-3xl border p-6 md:p-8')}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Server Widget</p>
+                    <h2 className="mt-2 text-3xl font-semibold text-white">{activeServer.name}</h2>
+                    <p className="mt-2 text-sm text-slate-200/90">Dedicated server view. Press Esc or Close to return to dashboard.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveServerId(null)}
+                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-xl leading-none text-slate-200 transition hover:border-emerald-100/30 hover:text-emerald-100"
+                    aria-label="Close server widget"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="mt-6 grid gap-4 md:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Server Name</p>
+                    <p className="mt-2 text-lg font-semibold text-white">{activeServer.name}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Server ID</p>
+                    <p className="mt-2 truncate text-sm text-slate-200">{activeServer.id}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Created</p>
+                    <p className="mt-2 text-sm text-slate-200">
+                      {new Date(activeServer.createdAt).toLocaleDateString('ro-RO', { year: 'numeric', month: 'long', day: 'numeric' })}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-wrap gap-2">
+                  <Button variant="soft" onClick={() => openServer(activeServer.id)}>
+                    Enter Server
+                  </Button>
+                  <Button variant="soft" onClick={() => setActiveServerId(null)}>
+                    Close Widget
+                  </Button>
+                </div>
+              </section>
+            </div>
+          </div>
+        ) : null}
       </div>
     </>
   );
