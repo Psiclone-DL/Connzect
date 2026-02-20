@@ -175,8 +175,8 @@ Desktop updates are distributed from GitHub Releases (repo public).
 Flow-ul este automat prin GitHub Actions:
 
 1. Faci push pe `main`.
-2. Workflow `Auto Version Tag` face patch bump + commit + tag (`vX.Y.Z`).
-3. Workflow `Publish Windows Release` ruleaza pe tag, construieste `.exe` si publica release-ul pe GitHub.
+2. Workflow `Publish Windows Release` face patch bump + commit + tag (`vX.Y.Z`).
+3. Acelasi workflow construieste `.exe` si publica release-ul pe GitHub.
 
 When users open the app, it checks for updates at startup and every 30 minutes, downloads automatically, then asks for restart.
 

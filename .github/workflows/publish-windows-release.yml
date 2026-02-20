@@ -2,8 +2,8 @@ name: Publish Windows Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -31,6 +31,17 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
+
+      - name: Configure Git Identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump Patch Version And Create Tag
+        run: npm version patch -m "chore(release): v%s [skip ci]"
+
+      - name: Push Release Commit And Tag
+        run: git push origin main --follow-tags
 
       - name: Build And Publish Windows Release
         env:
