@@ -42,7 +42,7 @@ export const ServerCard = ({ server, collapsed = false, onOpen }: ServerCardProp
       </div>
       <div className={cn('min-w-0', collapsed ? 'hidden' : 'block')}>
         <p className="truncate text-sm font-medium text-slate-100">{server.name}</p>
-        <p className="mt-0.5 text-xs text-emerald-100/60">Open workspace</p>
+        <p className="mt-0.5 text-xs text-emerald-100/60">Server</p>
       </div>
     </button>
   );

@@ -9,13 +9,22 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import type { ConnzectServer, DirectConversation } from '@/types';
-import { NewsCard, type NewsCardVariant } from './news-card';
 import { Sidebar } from './sidebar';
 import styles from './landing-page.module.css';
 
-const featuredLayout: NewsCardVariant[] = ['hero', 'medium', 'wide'];
+const getServerInitials = (name: string) => {
+  const trimmed = name.trim();
+  if (!trimmed) return 'SV';
 
-const getServerNewsCount = (server: ConnzectServer, index: number) => ((server.name.length + index * 3) % 8) + 3;
+  const initials = trimmed
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  return initials || trimmed.slice(0, 2).toUpperCase();
+};
 
 interface LandingPageProps {
   requireAuth?: boolean;
@@ -30,6 +39,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [tabletSidebarCollapsed, setTabletSidebarCollapsed] = useState(false);
   const [isTabletViewport, setIsTabletViewport] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState('');
   const [dmEmail, setDmEmail] = useState('');
 
@@ -80,17 +90,21 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     }
   }, [isTabletViewport]);
 
-  const featuredServers = useMemo(
-    () =>
-      servers.slice(0, 3).map((server, index) => ({
-        server,
-        variant: featuredLayout[index] ?? 'medium',
-        newsCount: getServerNewsCount(server, index)
-      })),
-    [servers]
+  useEffect(() => {
+    if (!activeServerId) return;
+    if (!servers.some((server) => server.id === activeServerId)) {
+      setActiveServerId(null);
+    }
+  }, [activeServerId, servers]);
+
+  const activeServer = useMemo(
+    () => (activeServerId ? servers.find((server) => server.id === activeServerId) ?? null : null),
+    [activeServerId, servers]
   );
 
-  const connzectNewsCount = Math.max(3, servers.length * 2 + 1);
+  const openServerWidget = (serverId: string) => {
+    setActiveServerId(serverId);
+  };
 
   const openServer = (serverId: string) => {
     if (!user) {
@@ -211,7 +225,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         >
           <Sidebar
             servers={servers}
-            onOpenServer={openServer}
+            onOpenServer={openServerWidget}
             onServerPicked={() => setMobileSidebarOpen(false)}
             className="h-full"
           />
@@ -224,7 +238,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               sidebarCollapsed ? 'w-20' : 'w-72'
             )}
           >
-            <Sidebar servers={servers} collapsed={sidebarCollapsed} onOpenServer={openServer} className="h-[calc(100vh-7.5rem)]" />
+            <Sidebar
+              servers={servers}
+              collapsed={sidebarCollapsed}
+              onOpenServer={openServerWidget}
+              className="h-[calc(100vh-7.5rem)]"
+            />
           </div>
 
           <main className="min-w-0 flex-1 space-y-6">
@@ -238,64 +257,99 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   ? 'Your mint-black activity board with all server highlights in one place.'
                   : 'Mint-black overview for your communities, updates, and workspace activity.'}
               </p>
+              {user ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button variant="soft" onClick={() => setActionsOpen((current) => !current)}>
+                    {actionsOpen ? 'Hide Workspace Actions' : 'Workspace Actions'}
+                  </Button>
+                  <Button variant="soft" onClick={() => router.push('/dm')}>
+                    Open DM Hub
+                  </Button>
+                </div>
+              ) : null}
             </section>
 
             {user && error ? (
               <section className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-200">{error}</section>
             ) : null}
 
-            <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.85fr)]">
-              <div className="grid gap-6 sm:auto-rows-[170px] sm:grid-cols-2">
-                {featuredServers.map((entry, index) => (
-                  <NewsCard
-                    key={entry.server.id}
-                    server={entry.server}
-                    newsCount={entry.newsCount}
-                    variant={entry.variant}
-                    onOpenServer={openServer}
-                    delayClassName={index === 0 ? styles.fadeDelay1 : index === 1 ? styles.fadeDelay2 : styles.fadeDelay3}
-                  />
-                ))}
-
-                {featuredServers.length === 0 ? (
-                  <div className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6 sm:col-span-2')}>
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Server News</p>
-                    <h3 className="mt-2 text-xl font-semibold text-white">No servers available</h3>
-                    <p className="mt-2 text-sm text-slate-300">Create or join a server to unlock the personalized news grid.</p>
+            {activeServer ? (
+              <section className={cn(styles.surfaceStrong, styles.fadeIn, 'rounded-3xl border p-6')}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Server Widget</p>
+                    <h2 className="mt-2 text-3xl font-semibold text-white">{activeServer.name}</h2>
                   </div>
-                ) : null}
-              </div>
-
-              <section className={cn(styles.surfaceStrong, styles.cardLift, styles.fadeIn, styles.fadeDelay2, 'rounded-3xl border p-6')}>
-                <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Connzect News</p>
-                <h2 className="mt-2 text-3xl font-semibold text-white">{connzectNewsCount} Connzect News</h2>
-                <p className="mt-3 text-sm text-slate-200/90">
-                  Platform-wide release notes, trust alerts, and system updates curated for your workspace.
-                </p>
-
-                <div className="mt-6 space-y-3">
-                  <div className="rounded-2xl border border-emerald-100/15 bg-black/15 px-4 py-3 text-sm text-emerald-50/90">Server uptime and reliability digest</div>
-                  <div className="rounded-2xl border border-emerald-100/15 bg-black/15 px-4 py-3 text-sm text-emerald-50/90">Latest communication improvements</div>
-                  <div className="rounded-2xl border border-emerald-100/15 bg-black/15 px-4 py-3 text-sm text-emerald-50/90">Moderation and safety highlights</div>
+                  <div className="flex gap-2">
+                    <Button variant="soft" onClick={() => openServer(activeServer.id)}>
+                      Enter Server
+                    </Button>
+                    <Button variant="soft" onClick={() => setActiveServerId(null)}>
+                      Close Widget
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="mt-6 flex flex-wrap gap-2">
-                  <Button variant="soft" onClick={() => router.push(user ? '/dm' : '/login')}>
-                    {user ? 'Open DM Hub' : 'Sign In'}
-                  </Button>
-                  {user ? (
-                    <Button variant="soft" onClick={() => setActionsOpen((current) => !current)}>
-                      {actionsOpen ? 'Hide Workspace Actions' : 'Workspace Actions'}
-                    </Button>
-                  ) : null}
-                  {servers[0] ? (
-                    <Button variant="soft" onClick={() => openServer(servers[0].id)}>
-                      Open First Server
-                    </Button>
-                  ) : null}
+                <div className="mt-6 grid gap-4 md:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Server Name</p>
+                    <p className="mt-2 text-lg font-semibold text-white">{activeServer.name}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Server ID</p>
+                    <p className="mt-2 truncate text-sm text-slate-200">{activeServer.id}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Created</p>
+                    <p className="mt-2 text-sm text-slate-200">
+                      {new Date(activeServer.createdAt).toLocaleDateString('ro-RO', { year: 'numeric', month: 'long', day: 'numeric' })}
+                    </p>
+                  </div>
                 </div>
               </section>
-            </section>
+            ) : (
+              <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Servers</p>
+                    <h2 className="mt-2 text-2xl font-semibold text-white">Select a server widget</h2>
+                  </div>
+                  <span className="rounded-xl border border-emerald-100/20 bg-emerald-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-emerald-50">
+                    {servers.length} servers
+                  </span>
+                </div>
+
+                {servers.length > 0 ? (
+                  <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {servers.map((server) => (
+                      <button
+                        key={server.id}
+                        type="button"
+                        onClick={() => openServerWidget(server.id)}
+                        className={cn(
+                          styles.cardLift,
+                          'rounded-2xl border border-white/10 bg-black/15 p-4 text-left transition'
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-100/20 bg-emerald-300/10 text-xs font-semibold tracking-[0.14em] text-emerald-100">
+                            {getServerInitials(server.name)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-white">{server.name}</p>
+                            <p className="mt-1 text-xs text-slate-300">Open server widget</p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-6 rounded-2xl border border-dashed border-white/20 p-5 text-sm text-slate-300">
+                    No servers available. Create or join one from Workspace Actions.
+                  </div>
+                )}
+              </section>
+            )}
 
             {user && actionsOpen ? (
               <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
