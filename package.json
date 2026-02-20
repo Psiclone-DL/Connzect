@@ -13,10 +13,10 @@
     "dev:backend": "npm run dev --workspace backend",
     "dev:frontend": "npm run dev --workspace frontend",
     "build": "npm run build --workspace backend && npm run build --workspace frontend",
-    "build:desktop": "npm run build --workspace backend && npm run build --workspace frontend && node scripts/prepare-desktop.js",
-    "desktop": "npm run build:desktop && electron .",
-    "dev:desktop": "concurrently -k \"npm run dev:backend\" \"npm run dev:frontend\" \"wait-on http://127.0.0.1:3000 && cross-env CONNZECT_EXTERNAL_SERVERS=1 electron .\"",
-    "dist:win": "npm run build:desktop && electron-builder --win nsis"
+    "build:desktop": "node -e \"console.log('Desktop client targets VPS web URL only. No local runtime build needed.')\"",
+    "desktop": "electron .",
+    "dev:desktop": "cross-env CONNZECT_WEB_URL=http://127.0.0.1:3000 CONNZECT_DEVTOOLS=1 electron .",
+    "dist:win": "electron-builder --win nsis"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
@@ -34,13 +34,6 @@
     },
     "files": [
       "electron/**/*",
-      "scripts/prepare-desktop.js",
-      "backend/dist/**/*",
-      "backend/prisma/**/*",
-      "backend/node_modules/**/*",
-      "frontend/.next/standalone/**/*",
-      "frontend/.next/static/**/*",
-      "frontend/public/**/*",
       "package.json"
     ],
     "win": {
