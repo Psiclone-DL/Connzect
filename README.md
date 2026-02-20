@@ -175,7 +175,7 @@ Desktop updates are distributed from GitHub Releases (repo public).
 Flow-ul este automat prin GitHub Actions:
 
 1. Faci push pe `main`.
-2. Workflow `Publish Windows Release` ruleaza la fiecare 15 minute (sau manual), verifica ultimul commit si daca nu este deja release:
+2. Workflow `Desktop Auto Release` ruleaza la fiecare 15 minute (sau manual), verifica ultimul commit si daca nu este deja release:
    - face patch bump + commit + tag (`vX.Y.Z`)
    - construieste `.exe` si publica release-ul pe GitHub
 
