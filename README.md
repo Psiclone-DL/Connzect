@@ -126,6 +126,63 @@ npm run dev
 
 Frontend runs on `http://localhost:3000`.
 
+## Desktop (.exe) Build
+
+Connzect includes Electron packaging so you can generate a Windows installer.
+
+### Prerequisites (Windows PC)
+
+- Node.js 20+
+- PostgreSQL running (local or remote)
+- Project dependencies installed in root + workspaces
+
+### 1) Install dependencies
+
+From project root:
+
+```bash
+npm install
+npm install --workspaces
+```
+
+### 2) Generate backend Prisma client and run migrations
+
+```bash
+cd backend
+copy .env.example .env
+npx prisma generate
+npx prisma migrate deploy
+cd ..
+```
+
+### 3) Build Windows installer
+
+```bash
+npm run dist:win
+```
+
+Output:
+
+- `desktop-dist/Connzect Setup *.exe`
+
+### Useful desktop scripts
+
+- `npm run dev:desktop`:
+  - Runs backend + frontend dev servers
+  - Launches Electron shell pointing to local dev app
+
+- `npm run desktop`:
+  - Builds backend/frontend desktop artifacts
+  - Launches Electron in local production mode
+
+### Runtime notes
+
+- Desktop app starts local frontend (`127.0.0.1:3000`) and backend (`127.0.0.1:4000`) from built artifacts.
+- Backend still requires a valid PostgreSQL `DATABASE_URL`.
+- Set production secrets via environment variables on your PC:
+  - `JWT_ACCESS_SECRET`
+  - `JWT_REFRESH_SECRET`
+
 ## API Overview
 
 Base URL: `http://localhost:4000/api`

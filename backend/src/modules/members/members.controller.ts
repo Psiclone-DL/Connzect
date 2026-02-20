@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
+import { routeParam } from '../../utils/params';
 import { Permission } from '../../utils/permissions';
 import { requireServerPermission } from '../servers/server-access';
 
@@ -26,7 +27,8 @@ const ensureNotOwner = async (serverId: string, memberId: string) => {
 export const kickMember = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId, memberId } = req.params;
+  const serverId = routeParam(req.params.serverId);
+  const memberId = routeParam(req.params.memberId);
   await requireServerPermission(serverId, req.user.id, Permission.KICK_MEMBER);
 
   const member = await ensureNotOwner(serverId, memberId);
@@ -38,7 +40,8 @@ export const kickMember = async (req: Request, res: Response): Promise<void> => 
 export const banMember = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId, memberId } = req.params;
+  const serverId = routeParam(req.params.serverId);
+  const memberId = routeParam(req.params.memberId);
   await requireServerPermission(serverId, req.user.id, Permission.BAN_MEMBER);
 
   const member = await ensureNotOwner(serverId, memberId);

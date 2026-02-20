@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
+import { routeParam } from '../../utils/params';
 import { Permission } from '../../utils/permissions';
 import { requireServerPermission } from '../servers/server-access';
 
@@ -26,7 +27,7 @@ const pickCode = async (): Promise<string> => {
 export const createInvite = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId } = req.params;
+  const serverId = routeParam(req.params.serverId);
   await requireServerPermission(serverId, req.user.id, Permission.MANAGE_SERVER);
 
   const code = await pickCode();
@@ -58,7 +59,7 @@ export const createInvite = async (req: Request, res: Response): Promise<void> =
 export const listInvites = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId } = req.params;
+  const serverId = routeParam(req.params.serverId);
   await requireServerPermission(serverId, req.user.id, Permission.MANAGE_SERVER);
 
   const invites = await prisma.invite.findMany({
@@ -72,7 +73,8 @@ export const listInvites = async (req: Request, res: Response): Promise<void> =>
 export const revokeInvite = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId, inviteId } = req.params;
+  const serverId = routeParam(req.params.serverId);
+  const inviteId = routeParam(req.params.inviteId);
   await requireServerPermission(serverId, req.user.id, Permission.MANAGE_SERVER);
 
   const invite = await prisma.invite.findUnique({ where: { id: inviteId } });
@@ -93,7 +95,7 @@ export const revokeInvite = async (req: Request, res: Response): Promise<void> =
 export const joinByInvite = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { code } = req.params;
+  const code = routeParam(req.params.code);
 
   const joined = await prisma.$transaction(async (tx) => {
     const invite = await tx.invite.findUnique({

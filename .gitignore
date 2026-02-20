@@ -10,3 +10,4 @@ backend/.env
 frontend/.env.local
 backend/uploads/*
 !backend/uploads/.gitkeep
+desktop-dist

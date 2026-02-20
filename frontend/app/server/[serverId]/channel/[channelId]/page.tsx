@@ -386,7 +386,7 @@ export default function ChannelPage() {
                       currentUserId={user?.id}
                       onEdit={editMessage}
                       onDelete={deleteMessage}
-                      onOpenThread={(message) => setThreadParent(message)}
+                      onOpenThread={(message) => setThreadParent(message as Message)}
                       activeThreadParentId={threadParent?.id ?? null}
                     />
                     <MessageInput onSend={(content) => sendMessage(content)} placeholder="Type in channel" />

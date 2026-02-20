@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
+import { routeParam } from '../../utils/params';
 import { Permission } from '../../utils/permissions';
 import { requireServerPermission } from './server-access';
 
@@ -82,7 +83,7 @@ export const getServer = async (req: Request, res: Response): Promise<void> => {
     throw new HttpError(401, 'Unauthorized');
   }
 
-  const { serverId } = req.params;
+  const serverId = routeParam(req.params.serverId);
   await requireServerPermission(serverId, req.user.id, Permission.VIEW_CHANNEL);
 
   const server = await prisma.server.findUnique({
@@ -135,7 +136,7 @@ export const addMemberByEmail = async (req: Request, res: Response): Promise<voi
     throw new HttpError(401, 'Unauthorized');
   }
 
-  const { serverId } = req.params;
+  const serverId = routeParam(req.params.serverId);
   await requireServerPermission(serverId, req.user.id, Permission.MANAGE_SERVER);
 
   const user = await prisma.user.findUnique({ where: { email: req.body.email.toLowerCase() } });

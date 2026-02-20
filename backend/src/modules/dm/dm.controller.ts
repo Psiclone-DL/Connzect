@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
+import { routeParam } from '../../utils/params';
 
 const includeAuthor = {
   author: {
@@ -171,7 +172,7 @@ export const createConversation = async (req: Request, res: Response): Promise<v
 export const getMessages = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { conversationId } = req.params;
+  const conversationId = routeParam(req.params.conversationId);
   const limit = Number(req.query.limit ?? 50);
   const parentMessageId = typeof req.query.parentMessageId === 'string' ? req.query.parentMessageId : undefined;
 
@@ -209,7 +210,7 @@ export const getMessages = async (req: Request, res: Response): Promise<void> =>
 export const createMessage = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { conversationId } = req.params;
+  const conversationId = routeParam(req.params.conversationId);
   const parentMessageId = req.body.parentMessageId as string | undefined;
 
   await ensureConversationMember(conversationId, req.user.id);
@@ -243,7 +244,8 @@ export const createMessage = async (req: Request, res: Response): Promise<void> 
 export const updateMessage = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { conversationId, messageId } = req.params;
+  const conversationId = routeParam(req.params.conversationId);
+  const messageId = routeParam(req.params.messageId);
   await ensureConversationMember(conversationId, req.user.id);
 
   const message = await prisma.directMessage.findFirst({
@@ -280,7 +282,8 @@ export const updateMessage = async (req: Request, res: Response): Promise<void> 
 export const deleteMessage = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { conversationId, messageId } = req.params;
+  const conversationId = routeParam(req.params.conversationId);
+  const messageId = routeParam(req.params.messageId);
   await ensureConversationMember(conversationId, req.user.id);
 
   const message = await prisma.directMessage.findFirst({

@@ -2,6 +2,7 @@
   "name": "connzect",
   "version": "1.0.0",
   "private": true,
+  "main": "electron/main.cjs",
   "workspaces": [
     "backend",
     "frontend"
@@ -11,6 +12,46 @@
     "dev": "npm run dev --workspace backend",
     "dev:backend": "npm run dev --workspace backend",
     "dev:frontend": "npm run dev --workspace frontend",
-    "build": "npm run build --workspace backend && npm run build --workspace frontend"
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "build:desktop": "npm run build --workspace backend && npm run build --workspace frontend && node scripts/prepare-desktop.js",
+    "desktop": "npm run build:desktop && electron .",
+    "dev:desktop": "concurrently -k \"npm run dev:backend\" \"npm run dev:frontend\" \"wait-on http://127.0.0.1:3000 && cross-env CONNZECT_EXTERNAL_SERVERS=1 electron .\"",
+    "dist:win": "npm run build:desktop && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.psiclone.connzect",
+    "productName": "Connzect",
+    "asar": false,
+    "directories": {
+      "output": "desktop-dist"
+    },
+    "files": [
+      "electron/**/*",
+      "scripts/prepare-desktop.js",
+      "backend/dist/**/*",
+      "backend/prisma/**/*",
+      "backend/node_modules/**/*",
+      "frontend/.next/standalone/**/*",
+      "frontend/.next/static/**/*",
+      "frontend/public/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   }
 }

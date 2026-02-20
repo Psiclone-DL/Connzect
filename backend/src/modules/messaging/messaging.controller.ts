@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
+import { routeParam } from '../../utils/params';
 import { Permission, hasPermission } from '../../utils/permissions';
 import { applyChannelOverrides, getMemberContext } from '../servers/server-access';
 
@@ -48,7 +49,7 @@ const assertParentBelongsToChannel = async (channelId: string, parentMessageId: 
 export const getMessages = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { channelId } = req.params;
+  const channelId = routeParam(req.params.channelId);
   const limit = Number(req.query.limit ?? 50);
   const parentMessageId = typeof req.query.parentMessageId === 'string' ? req.query.parentMessageId : undefined;
 
@@ -77,7 +78,7 @@ export const getMessages = async (req: Request, res: Response): Promise<void> =>
 export const createMessage = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { channelId } = req.params;
+  const channelId = routeParam(req.params.channelId);
   const parentMessageId = req.body.parentMessageId as string | undefined;
   const { effective } = await ensureChannelAccess(channelId, req.user.id);
 
@@ -105,7 +106,8 @@ export const createMessage = async (req: Request, res: Response): Promise<void> 
 export const updateMessage = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { channelId, messageId } = req.params;
+  const channelId = routeParam(req.params.channelId);
+  const messageId = routeParam(req.params.messageId);
   const { effective } = await ensureChannelAccess(channelId, req.user.id);
 
   const message = await prisma.message.findFirst({
@@ -144,7 +146,8 @@ export const updateMessage = async (req: Request, res: Response): Promise<void> 
 export const deleteMessage = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { channelId, messageId } = req.params;
+  const channelId = routeParam(req.params.channelId);
+  const messageId = routeParam(req.params.messageId);
   const { effective } = await ensureChannelAccess(channelId, req.user.id);
 
   const message = await prisma.message.findFirst({

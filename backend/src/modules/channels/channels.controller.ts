@@ -2,13 +2,14 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
+import { routeParam } from '../../utils/params';
 import { Permission, hasPermission } from '../../utils/permissions';
 import { applyChannelOverrides, getMemberContext, requireServerPermission } from '../servers/server-access';
 
 export const listVisibleChannels = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId } = req.params;
+  const serverId = routeParam(req.params.serverId);
   const context = await getMemberContext(serverId, req.user.id);
 
   const channels = await prisma.channel.findMany({
@@ -31,7 +32,7 @@ export const listVisibleChannels = async (req: Request, res: Response): Promise<
 export const createChannel = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId } = req.params;
+  const serverId = routeParam(req.params.serverId);
   await requireServerPermission(serverId, req.user.id, Permission.CREATE_CHANNEL);
 
   const highestPosition = await prisma.channel.findFirst({
@@ -54,7 +55,8 @@ export const createChannel = async (req: Request, res: Response): Promise<void> 
 export const renameChannel = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId, channelId } = req.params;
+  const serverId = routeParam(req.params.serverId);
+  const channelId = routeParam(req.params.channelId);
   await requireServerPermission(serverId, req.user.id, Permission.MANAGE_SERVER);
 
   const channel = await prisma.channel.findUnique({ where: { id: channelId } });
@@ -75,7 +77,8 @@ export const renameChannel = async (req: Request, res: Response): Promise<void> 
 export const deleteChannel = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId, channelId } = req.params;
+  const serverId = routeParam(req.params.serverId);
+  const channelId = routeParam(req.params.channelId);
   await requireServerPermission(serverId, req.user.id, Permission.DELETE_CHANNEL);
 
   const channel = await prisma.channel.findUnique({ where: { id: channelId } });
@@ -91,7 +94,9 @@ export const deleteChannel = async (req: Request, res: Response): Promise<void> 
 export const updateRoleChannelPermissions = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
-  const { serverId, channelId, roleId } = req.params;
+  const serverId = routeParam(req.params.serverId);
+  const channelId = routeParam(req.params.channelId);
+  const roleId = routeParam(req.params.roleId);
   await requireServerPermission(serverId, req.user.id, Permission.MANAGE_PERMISSIONS);
 
   const [channel, role] = await Promise.all([
