@@ -472,9 +472,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="mt-2 text-2xl font-semibold text-white">{activeServer.name}</h2>
-                    <p className="mt-1 text-sm text-slate-200/90">
-                      {activeChannel ? `Channel: #${activeChannel.name}` : 'Select a channel to start chatting.'}
-                    </p>
                   </div>
                   <Button variant="soft" onClick={closeServer}>
                     Close
