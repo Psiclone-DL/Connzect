@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { CreateServerForm } from '@/components/forms/create-server-form';
@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { resolveAssetUrl } from '@/lib/assets';
 import { useSocket } from '@/hooks/use-socket';
-import type { Channel, ConnzectServer, Message, Role, ServerDetails, VoiceParticipant } from '@/types';
+import type { Channel, ConnzectServer, DirectConversation, Message, Role, ServerDetails, VoiceParticipant } from '@/types';
 import { Sidebar } from './sidebar';
 import styles from './landing-page.module.css';
 
@@ -74,6 +74,35 @@ const compareBigIntDesc = (left: bigint, right: bigint): number => {
   return left > right ? -1 : 1;
 };
 
+type RankedMemberEntry = {
+  id: string;
+  userId: string;
+  userEmail: string;
+  displayName: string;
+  initials: string;
+  isOwner: boolean;
+  category: string;
+  roleLabel: string;
+  roleColor: string | null;
+  power: bigint;
+  rank: number;
+};
+
+type ContextMenuState =
+  | {
+      type: 'channel';
+      x: number;
+      y: number;
+      channel: Channel;
+    }
+  | {
+      type: 'member';
+      x: number;
+      y: number;
+      member: RankedMemberEntry;
+    }
+  | null;
+
 export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const router = useRouter();
   const { user, loading, logout, authRequest, accessToken } = useAuth();
@@ -106,10 +135,16 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [threadParent, setThreadParent] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [channelProperties, setChannelProperties] = useState<Channel | null>(null);
+  const [memberAudioSettings, setMemberAudioSettings] = useState<Record<string, { volume: number; muted: boolean }>>({});
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const [inviteCode, setInviteCode] = useState('');
   const closeTimerRef = useRef<number | null>(null);
   const openTimerRef = useRef<number | null>(null);
+  const actionNoticeTimerRef = useRef<number | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const activeChannel = useMemo(
     () => channels.find((channel) => channel.id === activeChannelId) ?? null,
     [activeChannelId, channels]
@@ -231,9 +266,43 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       if (openTimerRef.current) {
         window.clearTimeout(openTimerRef.current);
       }
+      if (actionNoticeTimerRef.current) {
+        window.clearTimeout(actionNoticeTimerRef.current);
+      }
     },
     []
   );
+
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (contextMenuRef.current && target && !contextMenuRef.current.contains(target)) {
+        setContextMenu(null);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null);
+      }
+    };
+
+    const dismiss = () => setContextMenu(null);
+
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', dismiss);
+    window.addEventListener('scroll', dismiss, true);
+
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     if (!activeServerId) {
@@ -395,7 +464,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     [activeServerId, servers]
   );
 
-  const rankedMembers = useMemo(() => {
+  const rankedMembers = useMemo<RankedMemberEntry[]>(() => {
     if (!activeServer || serverMembers.length === 0) return [];
 
     const ownerBoost = 1n << 62n;
@@ -424,6 +493,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
         return {
           id: member.id,
+          userId: member.userId,
+          userEmail: member.user.email,
           displayName: member.nickname?.trim() || member.user.displayName,
           initials:
             (member.nickname?.trim() || member.user.displayName)
@@ -485,6 +556,129 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       return left.name.localeCompare(right.name);
     });
   }, [rankedMembers]);
+
+  const showActionNotice = useCallback((message: string) => {
+    setActionNotice(message);
+    if (actionNoticeTimerRef.current) {
+      window.clearTimeout(actionNoticeTimerRef.current);
+    }
+    actionNoticeTimerRef.current = window.setTimeout(() => {
+      setActionNotice(null);
+      actionNoticeTimerRef.current = null;
+    }, 2200);
+  }, []);
+
+  const resolveContextMenuPosition = useCallback((clientX: number, clientY: number) => {
+    const menuWidth = 288;
+    const menuHeight = 320;
+    const x = Math.min(clientX, window.innerWidth - menuWidth);
+    const y = Math.min(clientY, window.innerHeight - menuHeight);
+    return {
+      x: Math.max(8, x),
+      y: Math.max(8, y)
+    };
+  }, []);
+
+  const openChannel = useCallback(
+    (channel: Channel, options?: { forceVoiceJoin?: boolean }) => {
+      setActiveChannelId(channel.id);
+      if (channel.type === 'TEXT') {
+        setActiveTextChannelId(channel.id);
+        return;
+      }
+
+      if (!connectedVoiceChannelId || connectedVoiceChannelId === channel.id || options?.forceVoiceJoin) {
+        setConnectedVoiceChannelId(channel.id);
+        setConnectedVoiceChannelName(channel.name);
+      }
+    },
+    [connectedVoiceChannelId]
+  );
+
+  const openChannelContextMenu = (event: MouseEvent<HTMLButtonElement>, channel: Channel) => {
+    event.preventDefault();
+    const { x, y } = resolveContextMenuPosition(event.clientX, event.clientY);
+    setContextMenu({ type: 'channel', x, y, channel });
+  };
+
+  const openMemberContextMenu = (event: MouseEvent<HTMLDivElement>, member: RankedMemberEntry) => {
+    event.preventDefault();
+    const { x, y } = resolveContextMenuPosition(event.clientX, event.clientY);
+    setContextMenu({ type: 'member', x, y, member });
+  };
+
+  const copyValue = useCallback(
+    async (value: string, label: string) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        showActionNotice(`${label} copied`);
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : `Failed to copy ${label}`);
+      }
+    },
+    [showActionNotice]
+  );
+
+  const markChannelAsRead = useCallback(
+    (channel: Channel) => {
+      if (channel.type === 'TEXT' && activeChatChannelId === channel.id) {
+        setThreadParent(null);
+        setThreadMessages([]);
+      }
+      showActionNotice(`#${channel.name} marked as read`);
+    },
+    [activeChatChannelId, showActionNotice]
+  );
+
+  const messageMember = useCallback(
+    async (member: RankedMemberEntry) => {
+      if (member.userId === user?.id) {
+        showActionNotice('You cannot DM yourself');
+        return;
+      }
+
+      try {
+        const conversation = await authRequest<DirectConversation>('/dm/conversations', {
+          method: 'POST',
+          body: JSON.stringify({ email: member.userEmail })
+        });
+        router.push(`/dm/${conversation.id}`);
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : 'Failed to start conversation');
+      }
+    },
+    [authRequest, router, showActionNotice, user?.id]
+  );
+
+  const updateMemberVolume = useCallback((memberUserId: string, volume: number) => {
+    setMemberAudioSettings((previous) => ({
+      ...previous,
+      [memberUserId]: {
+        volume,
+        muted: volume === 0
+      }
+    }));
+  }, []);
+
+  const toggleMemberMute = useCallback(
+    (member: RankedMemberEntry) => {
+      let nextMuted = false;
+      setMemberAudioSettings((previous) => {
+        const current = previous[member.userId] ?? { volume: 100, muted: false };
+        const muted = !current.muted;
+        nextMuted = muted;
+        return {
+          ...previous,
+          [member.userId]: {
+            volume: muted ? 0 : current.volume === 0 ? 100 : current.volume,
+            muted
+          }
+        };
+      });
+      showActionNotice(`${member.displayName} ${nextMuted ? 'muted' : 'unmuted'}`);
+    },
+    [showActionNotice]
+  );
 
   const openServerWidget = (serverId: string) => {
     if (activeServerId === serverId) {
@@ -932,6 +1126,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             {user && error ? (
               <section className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-200">{error}</section>
             ) : null}
+            {actionNotice ? (
+              <section className="rounded-2xl border border-emerald-300/35 bg-emerald-400/10 p-3 text-sm text-emerald-100">{actionNotice}</section>
+            ) : null}
 
             {activeServer ? (
               <section
@@ -968,17 +1165,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                         <div key={channel.id} className="space-y-1">
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveChannelId(channel.id);
-                              if (channel.type === 'TEXT') {
-                                setActiveTextChannelId(channel.id);
-                              } else if (channel.type === 'VOICE') {
-                                if (!connectedVoiceChannelId || connectedVoiceChannelId === channel.id) {
-                                  setConnectedVoiceChannelId(channel.id);
-                                  setConnectedVoiceChannelName(channel.name);
-                                }
-                              }
-                            }}
+                            onClick={() => openChannel(channel)}
+                            onContextMenu={(event) => openChannelContextMenu(event, channel)}
                             className={cn(
                               'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
                               activeChannelId === channel.id
@@ -1126,6 +1314,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             {group.members.map((member) => (
                               <div
                                 key={member.id}
+                                onContextMenu={(event) => openMemberContextMenu(event, member)}
                                 className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1.5 transition hover:border-white/15 hover:bg-white/5"
                               >
                                 <div className="min-w-0 flex items-center gap-2">
@@ -1133,7 +1322,16 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-[10px] font-semibold tracking-[0.08em] text-slate-200">
                                     {member.initials}
                                   </span>
-                                  <span className="truncate text-sm text-slate-100">{member.displayName}</span>
+                                  <span
+                                    className={cn(
+                                      'truncate text-sm',
+                                      memberAudioSettings[member.userId]?.muted || memberAudioSettings[member.userId]?.volume === 0
+                                        ? 'text-red-300'
+                                        : 'text-slate-100'
+                                    )}
+                                  >
+                                    {member.displayName}
+                                  </span>
                                 </div>
                               </div>
                             ))}
@@ -1184,6 +1382,152 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
           </main>
         </div>
+
+        {contextMenu ? (
+          <div
+            ref={contextMenuRef}
+            className="fixed z-[76] w-72 rounded-2xl border border-emerald-200/30 bg-slate-950/95 p-2 shadow-[0_18px_55px_-20px_rgba(16,185,129,0.7)] backdrop-blur-md"
+            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            {contextMenu.type === 'channel' ? (
+              <>
+                <p className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100/80">#{contextMenu.channel.name}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    openChannel(contextMenu.channel, { forceVoiceJoin: true });
+                    showActionNotice(`Joined #${contextMenu.channel.name}`);
+                    setContextMenu(null);
+                  }}
+                  className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                >
+                  <span>Join channel</span>
+                  <span className="text-xs text-slate-400">Enter</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void copyValue(contextMenu.channel.id, 'Channel ID');
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                >
+                  <span>Copy channel id</span>
+                  <span className="text-xs text-slate-400">ID</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChannelProperties(contextMenu.channel);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                >
+                  <span>Properties</span>
+                  <span className="text-xs text-slate-400">Info</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    markChannelAsRead(contextMenu.channel);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                >
+                  <span>Mark as read</span>
+                  <span className="text-xs text-slate-400">Done</span>
+                </button>
+              </>
+            ) : (() => {
+                const audio = memberAudioSettings[contextMenu.member.userId] ?? { volume: 100, muted: false };
+                return (
+                  <>
+                    <p className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100/80">{contextMenu.member.displayName}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void messageMember(contextMenu.member);
+                        setContextMenu(null);
+                      }}
+                      disabled={contextMenu.member.userId === user?.id}
+                      className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span>Message user</span>
+                      <span className="text-xs text-slate-400">DM</span>
+                    </button>
+                    <div className="mt-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                      <div className="mb-2 flex items-center justify-between text-[11px] text-slate-300">
+                        <span>Volume slider</span>
+                        <span>{audio.volume}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={audio.volume}
+                        onChange={(event) => updateMemberVolume(contextMenu.member.userId, Number(event.target.value))}
+                        className="h-1.5 w-full accent-emerald-300"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleMemberMute(contextMenu.member)}
+                      className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                    >
+                      <span>{audio.muted || audio.volume === 0 ? 'Unmute user' : 'Mute user'}</span>
+                      <span className="text-xs text-slate-400">{audio.muted || audio.volume === 0 ? 'On' : 'Off'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void copyValue(contextMenu.member.userId, 'User ID');
+                        setContextMenu(null);
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                    >
+                      <span>Copy User ID</span>
+                      <span className="text-xs text-slate-400">ID</span>
+                    </button>
+                  </>
+                );
+              })()}
+          </div>
+        ) : null}
+
+        {channelProperties ? (
+          <div className="fixed inset-0 z-[77] flex items-center justify-center p-4">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setChannelProperties(null)}
+              aria-label="Close channel properties"
+            />
+            <section className={cn(styles.surfaceStrong, 'relative z-[78] w-full max-w-sm rounded-3xl border p-5')}>
+              <p className="text-xs uppercase tracking-[0.2em] text-emerald-100/70">Channel Properties</p>
+              <h3 className="mt-2 text-xl font-semibold text-white">#{channelProperties.name}</h3>
+              <dl className="mt-4 space-y-2 text-sm text-slate-200">
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <dt className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Channel ID</dt>
+                  <dd className="mt-1 break-all font-mono text-xs">{channelProperties.id}</dd>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <dt className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Type</dt>
+                  <dd className="mt-1">{channelProperties.type}</dd>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <dt className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Position</dt>
+                  <dd className="mt-1">{channelProperties.position}</dd>
+                </div>
+              </dl>
+              <div className="mt-4 flex justify-end">
+                <Button variant="soft" onClick={() => setChannelProperties(null)}>
+                  Close
+                </Button>
+              </div>
+            </section>
+          </div>
+        ) : null}
 
         {user && joinModalOpen ? (
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
