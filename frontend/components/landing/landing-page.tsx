@@ -4,11 +4,15 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { CreateServerForm } from '@/components/forms/create-server-form';
+import { MessageInput } from '@/components/chat/message-input';
+import { MessageList } from '@/components/chat/message-list';
+import { VoiceRoom } from '@/components/voice/voice-room';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
-import type { ConnzectServer, DirectConversation } from '@/types';
+import { useSocket } from '@/hooks/use-socket';
+import type { Channel, ConnzectServer, DirectConversation, Message } from '@/types';
 import { Sidebar } from './sidebar';
 import styles from './landing-page.module.css';
 
@@ -32,14 +36,23 @@ interface LandingPageProps {
 
 export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const router = useRouter();
-  const { user, loading, logout, authRequest } = useAuth();
+  const { user, loading, logout, authRequest, accessToken } = useAuth();
+  const socket = useSocket(accessToken);
+
   const [servers, setServers] = useState<ConnzectServer[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [tabletSidebarCollapsed, setTabletSidebarCollapsed] = useState(false);
   const [isTabletViewport, setIsTabletViewport] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [activeChannelId, setActiveChannelId] = useState('');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [threadParent, setThreadParent] = useState<Message | null>(null);
+  const [threadMessages, setThreadMessages] = useState<Message[]>([]);
+
   const [inviteCode, setInviteCode] = useState('');
   const [dmEmail, setDmEmail] = useState('');
 
@@ -47,6 +60,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (loading || !user) {
       setServers([]);
       setError(null);
+      setActiveServerId(null);
       return;
     }
 
@@ -98,37 +112,195 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   }, [activeServerId, servers]);
 
   useEffect(() => {
-    if (!activeServerId) return;
+    if (!activeServerId) {
+      setChannels([]);
+      setActiveChannelId('');
+      setMessages([]);
+      setThreadParent(null);
+      setThreadMessages([]);
+      return;
+    }
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setActiveServerId(null);
-      }
+    authRequest<Channel[]>(`/servers/${activeServerId}/channels`)
+      .then((loadedChannels) => {
+        setChannels(loadedChannels);
+      })
+      .catch((nextError) => {
+        setError(nextError instanceof Error ? nextError.message : 'Failed loading channels');
+        setChannels([]);
+      });
+  }, [activeServerId, authRequest]);
+
+  useEffect(() => {
+    if (channels.length === 0) {
+      setActiveChannelId('');
+      setMessages([]);
+      setThreadParent(null);
+      setThreadMessages([]);
+      return;
+    }
+
+    if (channels.some((channel) => channel.id === activeChannelId)) return;
+    const firstText = channels.find((channel) => channel.type === 'TEXT');
+    setActiveChannelId((firstText ?? channels[0]).id);
+  }, [activeChannelId, channels]);
+
+  useEffect(() => {
+    if (!activeChannelId) {
+      setMessages([]);
+      setThreadParent(null);
+      setThreadMessages([]);
+      return;
+    }
+
+    authRequest<Message[]>(`/channels/${activeChannelId}/messages?limit=50`)
+      .then((loadedMessages) => {
+        setMessages(loadedMessages);
+        setThreadParent(null);
+        setThreadMessages([]);
+      })
+      .catch((nextError) => {
+        setError(nextError instanceof Error ? nextError.message : 'Failed loading messages');
+      });
+  }, [activeChannelId, authRequest]);
+
+  useEffect(() => {
+    if (!threadParent || !activeChannelId) return;
+
+    authRequest<Message[]>(`/channels/${activeChannelId}/messages?limit=50&parentMessageId=${threadParent.id}`)
+      .then(setThreadMessages)
+      .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Failed loading thread'));
+  }, [activeChannelId, authRequest, threadParent]);
+
+  useEffect(() => {
+    if (!socket || !activeChannelId) return;
+
+    const joinChannel = () => {
+      socket.emit('channel:join', { channelId: activeChannelId });
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeServerId]);
+    if (socket.connected) {
+      joinChannel();
+    }
+
+    const onMessage = (message: Message) => {
+      if (message.channelId !== activeChannelId) return;
+
+      if (message.parentMessageId) {
+        if (threadParent && message.parentMessageId === threadParent.id) {
+          setThreadMessages((previous) => [...previous, message]);
+        }
+        return;
+      }
+
+      setMessages((previous) => [...previous, message]);
+    };
+
+    const onMessageUpdated = (message: Message) => {
+      if (message.channelId !== activeChannelId) return;
+
+      setMessages((previous) => previous.map((entry) => (entry.id === message.id ? message : entry)));
+      setThreadMessages((previous) => previous.map((entry) => (entry.id === message.id ? message : entry)));
+      setThreadParent((previous) => (previous?.id === message.id ? message : previous));
+    };
+
+    const onError = (payload: { scope: string; message: string }) => {
+      setError(`${payload.scope}: ${payload.message}`);
+    };
+
+    socket.on('message:new', onMessage);
+    socket.on('message:updated', onMessageUpdated);
+    socket.on('error:event', onError);
+    socket.on('connect', joinChannel);
+
+    return () => {
+      socket.emit('channel:leave', { channelId: activeChannelId });
+      socket.off('message:new', onMessage);
+      socket.off('message:updated', onMessageUpdated);
+      socket.off('error:event', onError);
+      socket.off('connect', joinChannel);
+    };
+  }, [activeChannelId, socket, threadParent]);
 
   const activeServer = useMemo(
     () => (activeServerId ? servers.find((server) => server.id === activeServerId) ?? null : null),
     [activeServerId, servers]
   );
 
+  const activeChannel = useMemo(
+    () => channels.find((channel) => channel.id === activeChannelId) ?? null,
+    [activeChannelId, channels]
+  );
+
   const openServerWidget = (serverId: string) => {
     setActiveServerId(serverId);
   };
 
-  const openServer = (serverId: string) => {
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-    router.push(`/server/${serverId}`);
-  };
-
   const handleLogout = () => {
     logout().then(() => router.replace('/login'));
+  };
+
+  const upsertMessageLocal = (message: Message) => {
+    if (message.parentMessageId) {
+      setThreadMessages((previous) => {
+        if (previous.some((entry) => entry.id === message.id)) {
+          return previous.map((entry) => (entry.id === message.id ? message : entry));
+        }
+        return [...previous, message];
+      });
+      return;
+    }
+
+    setMessages((previous) => {
+      if (previous.some((entry) => entry.id === message.id)) {
+        return previous.map((entry) => (entry.id === message.id ? message : entry));
+      }
+      return [...previous, message];
+    });
+  };
+
+  const sendMessage = async (content: string, parentMessageId?: string) => {
+    if (!activeChannelId) return;
+
+    if (!socket?.connected) {
+      const created = await authRequest<Message>(`/channels/${activeChannelId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content, parentMessageId })
+      });
+      upsertMessageLocal(created);
+      return;
+    }
+
+    socket.emit('message:send', { channelId: activeChannelId, content, parentMessageId });
+  };
+
+  const editMessage = async (messageId: string, content: string) => {
+    if (!activeChannelId) return;
+
+    if (!socket?.connected) {
+      const updated = await authRequest<Message>(`/channels/${activeChannelId}/messages/${messageId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ content })
+      });
+      upsertMessageLocal(updated);
+      return;
+    }
+
+    socket.emit('message:edit', { channelId: activeChannelId, messageId, content });
+  };
+
+  const deleteMessage = async (messageId: string) => {
+    if (!activeChannelId) return;
+
+    if (!socket?.connected) {
+      const deleted = await authRequest<Message>(`/channels/${activeChannelId}/messages/${messageId}`, {
+        method: 'DELETE'
+      });
+      upsertMessageLocal(deleted);
+      return;
+    }
+
+    socket.emit('message:delete', { channelId: activeChannelId, messageId });
   };
 
   const joinInvite = async (event: FormEvent) => {
@@ -141,7 +313,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         method: 'POST'
       });
       setInviteCode('');
-      openServer(joined.server.id);
+      setActiveServerId(joined.server.id);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to join invite');
     }
@@ -290,7 +462,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Servers</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-white">Select a server widget</h2>
+                  <h2 className="mt-2 text-2xl font-semibold text-white">Select a server</h2>
                 </div>
                 <span className="rounded-xl border border-emerald-100/20 bg-emerald-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-emerald-50">
                   {servers.length} servers
@@ -315,7 +487,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                         </div>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-white">{server.name}</p>
-                          <p className="mt-1 text-xs text-slate-300">Open server widget</p>
+                          <p className="mt-1 text-xs text-slate-300">Channels</p>
                         </div>
                       </div>
                     </button>
@@ -327,6 +499,104 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                 </div>
               )}
             </section>
+
+            {activeServer ? (
+              <section className={cn(styles.surfaceStrong, styles.fadeIn, 'rounded-3xl border p-6')}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Server</p>
+                    <h2 className="mt-2 text-2xl font-semibold text-white">{activeServer.name}</h2>
+                    <p className="mt-1 text-sm text-slate-200/90">
+                      {activeChannel ? `Channel: #${activeChannel.name}` : 'Select a channel to start chatting.'}
+                    </p>
+                  </div>
+                  <Button variant="soft" onClick={() => setActiveServerId(null)}>
+                    Close
+                  </Button>
+                </div>
+
+                <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+                  <aside className="rounded-2xl border border-white/10 bg-black/15 p-3">
+                    <p className="mb-3 px-1 text-xs uppercase tracking-[0.2em] text-slate-400">Channels</p>
+                    <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1">
+                      {channels.map((channel) => (
+                        <button
+                          key={channel.id}
+                          type="button"
+                          onClick={() => setActiveChannelId(channel.id)}
+                          className={cn(
+                            'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                            activeChannelId === channel.id
+                              ? 'border-emerald-200/45 bg-white/10'
+                              : 'border-transparent hover:border-white/20 hover:bg-white/5'
+                          )}
+                        >
+                          <span>#{channel.name}</span>
+                          <span className="text-xs text-slate-400">{channel.type === 'TEXT' ? 'Text' : 'Voice'}</span>
+                        </button>
+                      ))}
+                      {channels.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-white/20 p-4 text-xs text-slate-400">
+                          No channels available for this server.
+                        </div>
+                      ) : null}
+                    </div>
+                  </aside>
+
+                  <section className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    {activeChannel ? (
+                      activeChannel.type === 'VOICE' && socket ? (
+                        <VoiceRoom channelId={activeChannel.id} socket={socket} />
+                      ) : (
+                        <div className={`grid gap-4 ${threadParent ? 'lg:grid-cols-[1.6fr_1fr]' : ''}`}>
+                          <div>
+                            <MessageList
+                              messages={messages}
+                              currentUserId={user?.id}
+                              onEdit={editMessage}
+                              onDelete={deleteMessage}
+                              onOpenThread={(message) => setThreadParent(message as Message)}
+                              activeThreadParentId={threadParent?.id ?? null}
+                            />
+                            <MessageInput onSend={(content) => sendMessage(content)} placeholder="Type in channel" />
+                          </div>
+
+                          {threadParent ? (
+                            <div className="glass rounded-xl border border-white/10 p-3">
+                              <div className="mb-3 flex items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-semibold">Thread</p>
+                                  <p className="text-xs text-slate-400">From {threadParent.author.displayName}</p>
+                                </div>
+                                <Button variant="soft" type="button" onClick={() => setThreadParent(null)}>
+                                  Close
+                                </Button>
+                              </div>
+
+                              <MessageList
+                                messages={threadMessages}
+                                currentUserId={user?.id}
+                                onEdit={editMessage}
+                                onDelete={deleteMessage}
+                              />
+                              <MessageInput
+                                onSend={(content) => sendMessage(content, threadParent.id)}
+                                placeholder="Reply in thread"
+                                submitLabel="Reply"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-white/20 p-6 text-sm text-slate-300">
+                        Pick a channel from the left box to view and send messages here.
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </section>
+            ) : null}
 
             {user && actionsOpen ? (
               <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
@@ -375,62 +645,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             ) : null}
           </main>
         </div>
-
-        {activeServer ? (
-          <div
-            className="fixed inset-0 z-[70] bg-black/70 px-4 pb-6 pt-24 backdrop-blur-sm md:px-8"
-            onClick={() => setActiveServerId(null)}
-          >
-            <div className="mx-auto flex w-full max-w-[1240px] justify-center">
-              <section
-                className={cn(styles.surfaceStrong, styles.fadeIn, 'w-full rounded-3xl border p-6 md:p-8')}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Server Widget</p>
-                    <h2 className="mt-2 text-3xl font-semibold text-white">{activeServer.name}</h2>
-                    <p className="mt-2 text-sm text-slate-200/90">Dedicated server view. Press Esc or Close to return to dashboard.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveServerId(null)}
-                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-xl leading-none text-slate-200 transition hover:border-emerald-100/30 hover:text-emerald-100"
-                    aria-label="Close server widget"
-                  >
-                    ×
-                  </button>
-                </div>
-
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Server Name</p>
-                    <p className="mt-2 text-lg font-semibold text-white">{activeServer.name}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Server ID</p>
-                    <p className="mt-2 truncate text-sm text-slate-200">{activeServer.id}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Created</p>
-                    <p className="mt-2 text-sm text-slate-200">
-                      {new Date(activeServer.createdAt).toLocaleDateString('ro-RO', { year: 'numeric', month: 'long', day: 'numeric' })}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-6 flex flex-wrap gap-2">
-                  <Button variant="soft" onClick={() => openServer(activeServer.id)}>
-                    Enter Server
-                  </Button>
-                  <Button variant="soft" onClick={() => setActiveServerId(null)}>
-                    Close Widget
-                  </Button>
-                </div>
-              </section>
-            </div>
-          </div>
-        ) : null}
       </div>
     </>
   );
