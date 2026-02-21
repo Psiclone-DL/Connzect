@@ -102,6 +102,27 @@ Use Docker:
 docker compose up -d
 ```
 
+### Quick VPS Deploy Script
+
+From project root:
+
+```bash
+./deploy.sh
+```
+
+With auto-commit + deploy in one command:
+
+```bash
+./deploy.sh --commit "feat: your changes"
+```
+
+Script flow:
+
+1. Optional commit (never stages `.env`)
+2. Push to `origin/main`
+3. Rebuild + restart `backend`, `frontend`, `nginx`
+4. Show final container status
+
 ### 2) Backend setup
 
 ```bash
@@ -175,7 +196,7 @@ Desktop updates are distributed from GitHub Releases (repo public).
 Flow-ul este automat prin GitHub Actions:
 
 1. Faci push pe `main`.
-2. Workflow `Desktop Auto Release` ruleaza la fiecare 15 minute (sau manual), verifica ultimul commit si daca nu este deja release:
+2. Workflow `Desktop Auto Release` ruleaza la push pe `main` (plus cron la 15 minute si manual), verifica ultimul commit si daca nu este deja release:
    - face patch bump + commit + tag (`vX.Y.Z`)
    - construieste `.exe` si publica release-ul pe GitHub
 
