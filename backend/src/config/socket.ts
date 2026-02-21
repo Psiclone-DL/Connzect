@@ -9,6 +9,7 @@ type AuthenticatedSocket = Socket & {
     userId: string;
     email: string;
     displayName: string;
+    avatarUrl?: string | null;
     voiceChannelId?: string;
   };
 };
@@ -17,6 +18,7 @@ type VoiceParticipant = {
   socketId: string;
   userId: string;
   displayName: string;
+  avatarUrl?: string | null;
 };
 
 const includeAuthor = {
@@ -30,12 +32,6 @@ const includeAuthor = {
 } as const;
 
 const voiceParticipants = new Map<string, Map<string, VoiceParticipant>>();
-const assertTextChannel = (channelType: 'TEXT' | 'VOICE'): void => {
-  if (channelType !== 'TEXT') {
-    throw new Error('Voice channels do not support text chat');
-  }
-};
-
 const broadcastVoiceParticipants = (io: Server, channelId: string): void => {
   const participants = Array.from(voiceParticipants.get(channelId)?.values() ?? []);
   io.to(`voice:${channelId}`).emit('voice:participants', participants);
@@ -53,8 +49,6 @@ const ensureChannelMessagingAccess = async (channelId: string, userId: string) =
   if (!hasPermission(effective, Permission.VIEW_CHANNEL)) {
     throw new Error('Missing VIEW_CHANNEL permission');
   }
-
-  assertTextChannel(channel.type);
 
   return { channel, effective };
 };
@@ -98,6 +92,7 @@ export const setupSocket = (io: Server): void => {
       (socket as AuthenticatedSocket).data.userId = user.id;
       (socket as AuthenticatedSocket).data.email = user.email;
       (socket as AuthenticatedSocket).data.displayName = user.displayName;
+      (socket as AuthenticatedSocket).data.avatarUrl = user.avatarUrl;
       next();
     } catch {
       next(new Error('Unauthorized socket'));
@@ -132,7 +127,10 @@ export const setupSocket = (io: Server): void => {
             throw new Error('Message must be between 1 and 2000 characters');
           }
 
-          const { effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
+          const { channel, effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
+          if (channel.type !== 'TEXT') {
+            throw new Error('Voice channels do not support text chat');
+          }
           if (!hasPermission(effective, Permission.SEND_MESSAGE)) {
             throw new Error('Missing SEND_MESSAGE permission');
           }
@@ -179,7 +177,10 @@ export const setupSocket = (io: Server): void => {
             throw new Error('Message must be between 1 and 2000 characters');
           }
 
-          const { effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
+          const { channel, effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
+          if (channel.type !== 'TEXT') {
+            throw new Error('Voice channels do not support text chat');
+          }
 
           const message = await prisma.message.findFirst({
             where: {
@@ -222,7 +223,10 @@ export const setupSocket = (io: Server): void => {
 
     authedSocket.on('message:delete', async (payload: { channelId: string; messageId: string }) => {
       try {
-        const { effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
+        const { channel, effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
+        if (channel.type !== 'TEXT') {
+          throw new Error('Voice channels do not support text chat');
+        }
 
         const message = await prisma.message.findFirst({
           where: {
@@ -436,7 +440,8 @@ export const setupSocket = (io: Server): void => {
         channelParticipants.set(authedSocket.id, {
           socketId: authedSocket.id,
           userId: authedSocket.data.userId,
-          displayName: authedSocket.data.displayName
+          displayName: authedSocket.data.displayName,
+          avatarUrl: authedSocket.data.avatarUrl
         });
         voiceParticipants.set(channelId, channelParticipants);
 

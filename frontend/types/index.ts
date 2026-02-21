@@ -98,4 +98,5 @@ export interface VoiceParticipant {
   socketId: string;
   userId: string;
   displayName: string;
+  avatarUrl?: string | null;
 }

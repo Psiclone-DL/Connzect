@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { VoiceParticipant } from '@/types';
+import { resolveAssetUrl } from '@/lib/assets';
 
 type SignalType = 'offer' | 'answer' | 'ice-candidate';
 
@@ -15,13 +16,14 @@ type SignalPayload = {
 interface VoiceRoomProps {
   channelId: string;
   socket: Socket;
+  onParticipantsChange?: (participants: VoiceParticipant[]) => void;
 }
 
 const rtcConfig: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
 
-export const VoiceRoom = ({ channelId, socket }: VoiceRoomProps) => {
+export const VoiceRoom = ({ channelId, socket, onParticipantsChange }: VoiceRoomProps) => {
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -98,6 +100,7 @@ export const VoiceRoom = ({ channelId, socket }: VoiceRoomProps) => {
 
     const handleParticipants = async (nextParticipants: VoiceParticipant[]) => {
       setParticipants(nextParticipants);
+      onParticipantsChange?.(nextParticipants);
       const me = socket.id;
 
       for (const participant of nextParticipants) {
@@ -152,11 +155,12 @@ export const VoiceRoom = ({ channelId, socket }: VoiceRoomProps) => {
       peersRef.current.clear();
       remoteStreamsRef.current.clear();
       setRemoteStreams([]);
+      onParticipantsChange?.([]);
 
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     };
-  }, [channelId, socket]);
+  }, [channelId, onParticipantsChange, socket]);
 
   return (
     <div className="space-y-4">
@@ -168,11 +172,22 @@ export const VoiceRoom = ({ channelId, socket }: VoiceRoomProps) => {
       {error ? <p className="text-xs text-red-400">{error}</p> : null}
 
       <div className="grid gap-2 sm:grid-cols-2">
-        {sortedParticipants.map((participant) => (
-          <div key={participant.socketId} className="glass rounded-xl px-3 py-2 text-sm">
-            {participant.displayName}
-          </div>
-        ))}
+        {sortedParticipants.map((participant) => {
+          const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
+          return (
+            <div key={participant.socketId} className="glass flex items-center gap-2 rounded-xl px-3 py-2 text-sm">
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarUrl} alt={participant.displayName} className="h-7 w-7 rounded-full object-cover" />
+              ) : (
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold">
+                  {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
+                </span>
+              )}
+              <span className="truncate">{participant.displayName}</span>
+            </div>
+          );
+        })}
       </div>
 
       <div className="space-y-2">

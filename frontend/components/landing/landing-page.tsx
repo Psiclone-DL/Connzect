@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { resolveAssetUrl } from '@/lib/assets';
 import { useSocket } from '@/hooks/use-socket';
-import type { Channel, ConnzectServer, Message, Role, ServerDetails } from '@/types';
+import type { Channel, ConnzectServer, Message, Role, ServerDetails, VoiceParticipant } from '@/types';
 import { Sidebar } from './sidebar';
 import styles from './landing-page.module.css';
 
@@ -99,6 +99,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [serverMembers, setServerMembers] = useState<ServerDetails['members']>([]);
   const [activeChannelId, setActiveChannelId] = useState('');
   const [activeTextChannelId, setActiveTextChannelId] = useState('');
+  const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [threadParent, setThreadParent] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
@@ -117,6 +118,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const activeChatChannel = useMemo(
     () => channels.find((channel) => channel.id === activeChatChannelId) ?? null,
     [activeChatChannelId, channels]
+  );
+  const isVoiceChannelActive = activeChannel?.type === 'VOICE';
+  const isVoiceConnected = useMemo(
+    () => Boolean(isVoiceChannelActive && user?.id && voiceParticipants.some((participant) => participant.userId === user.id)),
+    [isVoiceChannelActive, user?.id, voiceParticipants]
   );
   const accountAvatarUrl = useMemo(() => resolveAssetUrl(user?.avatarUrl ?? null), [user?.avatarUrl]);
   const accountInitial = useMemo(() => user?.displayName.trim().charAt(0).toUpperCase() || '?', [user?.displayName]);
@@ -275,6 +281,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (activeTextChannelId === activeChannel.id) return;
     setActiveTextChannelId(activeChannel.id);
   }, [activeChannel, activeTextChannelId]);
+
+  useEffect(() => {
+    if (isVoiceChannelActive) return;
+    setVoiceParticipants([]);
+    setIsSharingScreen(false);
+  }, [isVoiceChannelActive]);
 
   useEffect(() => {
     if (!activeChatChannelId || !activeChatChannel || activeChatChannel.type !== 'TEXT') {
@@ -511,6 +523,23 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     logout().then(() => router.replace('/login'));
   };
 
+  const disconnectVoice = () => {
+    if (!isVoiceChannelActive) return;
+    setIsSharingScreen(false);
+    setVoiceParticipants([]);
+    if (activeTextChannelId) {
+      setActiveChannelId(activeTextChannelId);
+      return;
+    }
+    const firstText = channels.find((channel) => channel.type === 'TEXT');
+    if (firstText) {
+      setActiveTextChannelId(firstText.id);
+      setActiveChannelId(firstText.id);
+      return;
+    }
+    setActiveChannelId('');
+  };
+
   const upsertMessageLocal = (message: Message) => {
     if (message.parentMessageId) {
       setThreadMessages((previous) => {
@@ -674,27 +703,120 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       <div className={cn(styles.shell, 'text-slate-100')}>
         <header className={cn(styles.header, 'sticky top-0 z-50')}>
           <div className="relative mx-auto flex h-20 max-w-[1600px] items-center gap-2 px-4 md:px-8">
-            <button
-              type="button"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/5 md:hidden"
-              onClick={() => setMobileSidebarOpen(true)}
-              aria-label="Open sidebar"
-            >
-              <div className="space-y-1.5">
-                <span className="block h-0.5 w-5 rounded-full bg-slate-200" />
-                <span className="block h-0.5 w-5 rounded-full bg-slate-200" />
-                <span className="block h-0.5 w-5 rounded-full bg-slate-200" />
-              </div>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/5 md:hidden"
+                onClick={() => setMobileSidebarOpen(true)}
+                aria-label="Open sidebar"
+              >
+                <div className="space-y-1.5">
+                  <span className="block h-0.5 w-5 rounded-full bg-slate-200" />
+                  <span className="block h-0.5 w-5 rounded-full bg-slate-200" />
+                  <span className="block h-0.5 w-5 rounded-full bg-slate-200" />
+                </div>
+              </button>
 
-            <button
-              type="button"
-              className="hidden h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/5 md:inline-flex lg:hidden"
-              onClick={() => setTabletSidebarCollapsed((current) => !current)}
-              aria-label="Toggle sidebar"
-            >
-              <span className="text-sm text-slate-200">{sidebarCollapsed ? '>' : '<'}</span>
-            </button>
+              <button
+                type="button"
+                className="hidden h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/5 md:inline-flex lg:hidden"
+                onClick={() => setTabletSidebarCollapsed((current) => !current)}
+                aria-label="Toggle sidebar"
+              >
+                <span className="text-sm text-slate-200">{sidebarCollapsed ? '>' : '<'}</span>
+              </button>
+
+              {user ? (
+                <div className={cn(styles.surface, 'hidden items-center gap-3 rounded-2xl border px-3 py-2 md:flex')}>
+                  {accountAvatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={accountAvatarUrl} alt={user.displayName} className="h-9 w-9 rounded-xl object-cover" />
+                  ) : (
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-sm font-semibold text-slate-100">
+                      {accountInitial}
+                    </div>
+                  )}
+
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-white">{user.displayName}</p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      aria-label="Mute microfon"
+                      title="Mute microfon"
+                      aria-pressed={isMicMuted}
+                      onClick={() => setIsMicMuted((current) => !current)}
+                      className={cn(
+                        'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
+                        isMicMuted ? 'border-red-300/40 bg-red-500/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                      )}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v4a3 3 0 0 0 3 3Z" />
+                        <path d="M19 11a7 7 0 0 1-14 0" />
+                        <path d="M12 18v3" />
+                        <path d="M8 21h8" />
+                      </svg>
+                    </button>
+
+                    <button
+                      type="button"
+                      aria-label="Mute auz"
+                      title="Mute auz"
+                      aria-pressed={isOutputMuted}
+                      onClick={() => setIsOutputMuted((current) => !current)}
+                      className={cn(
+                        'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
+                        isOutputMuted ? 'border-red-300/40 bg-red-500/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                      )}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+                        <path d="M16 9l5 5" />
+                        <path d="M21 9l-5 5" />
+                      </svg>
+                    </button>
+
+                    {isVoiceConnected ? (
+                      <>
+                        <button
+                          type="button"
+                          aria-label="Share screen"
+                          title="Share screen"
+                          aria-pressed={isSharingScreen}
+                          onClick={() => setIsSharingScreen((current) => !current)}
+                          className={cn(
+                            'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
+                            isSharingScreen ? 'border-emerald-200/40 bg-emerald-300/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                          )}
+                        >
+                          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="3" y="4" width="18" height="13" rx="2" />
+                            <path d="M8 20h8" />
+                            <path d="M12 17v3" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Disconnect voice"
+                          title="Disconnect voice"
+                          onClick={disconnectVoice}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-300/40 bg-red-500/20 text-slate-100 transition hover:bg-red-500/30"
+                        >
+                          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M4 15c4-4 12-4 16 0" />
+                            <path d="M10 15l-2 4" />
+                            <path d="M14 15l2 4" />
+                          </svg>
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
             <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
               <div className={cn(styles.logoBadge, 'rounded-full px-5 py-2')}>
@@ -705,78 +827,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             <div className="ml-auto flex items-center gap-2">
               {user ? (
                 <>
-                  <div className={cn(styles.surface, 'hidden items-center gap-3 rounded-2xl border px-3 py-2 md:flex')}>
-                    {accountAvatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={accountAvatarUrl} alt={user.displayName} className="h-9 w-9 rounded-xl object-cover" />
-                    ) : (
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-sm font-semibold text-slate-100">
-                        {accountInitial}
-                      </div>
-                    )}
-
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">{user.displayName}</p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        aria-label="Mute microfon"
-                        title="Mute microfon"
-                        aria-pressed={isMicMuted}
-                        onClick={() => setIsMicMuted((current) => !current)}
-                        className={cn(
-                          'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
-                          isMicMuted ? 'border-red-300/40 bg-red-500/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
-                        )}
-                      >
-                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v4a3 3 0 0 0 3 3Z" />
-                          <path d="M19 11a7 7 0 0 1-14 0" />
-                          <path d="M12 18v3" />
-                          <path d="M8 21h8" />
-                        </svg>
-                      </button>
-
-                      <button
-                        type="button"
-                        aria-label="Mute auz"
-                        title="Mute auz"
-                        aria-pressed={isOutputMuted}
-                        onClick={() => setIsOutputMuted((current) => !current)}
-                        className={cn(
-                          'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
-                          isOutputMuted ? 'border-red-300/40 bg-red-500/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
-                        )}
-                      >
-                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M11 5 6 9H2v6h4l5 4V5Z" />
-                          <path d="M16 9l5 5" />
-                          <path d="M21 9l-5 5" />
-                        </svg>
-                      </button>
-
-                      <button
-                        type="button"
-                        aria-label="Share screen"
-                        title="Share screen"
-                        aria-pressed={isSharingScreen}
-                        onClick={() => setIsSharingScreen((current) => !current)}
-                        className={cn(
-                          'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
-                          isSharingScreen ? 'border-emerald-200/40 bg-emerald-300/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
-                        )}
-                      >
-                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="3" y="4" width="18" height="13" rx="2" />
-                          <path d="M8 20h8" />
-                          <path d="M12 17v3" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-
                   <Button variant="soft" onClick={handleLogout}>
                     Logout
                   </Button>
@@ -873,44 +923,71 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   <aside className="rounded-2xl border border-white/10 bg-black/15 p-3">
                     <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1">
                       {channels.map((channel) => (
-                        <button
-                          key={channel.id}
-                          type="button"
-                          onClick={() => {
-                            setActiveChannelId(channel.id);
-                            if (channel.type === 'TEXT') {
-                              setActiveTextChannelId(channel.id);
-                            }
-                          }}
-                          className={cn(
-                            'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
-                            activeChannelId === channel.id
-                              ? 'border-emerald-200/45 bg-white/10'
-                              : 'border-transparent hover:border-white/20 hover:bg-white/5'
-                          )}
-                        >
-                          <span className="inline-flex items-center gap-2">
-                            {channel.type === 'VOICE' ? (
-                              <svg
-                                aria-hidden="true"
-                                viewBox="0 0 24 24"
-                                className="h-4 w-4 text-emerald-100/85"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="M11 5 6 9H2v6h4l5 4V5Z" />
-                                <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-                                <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
-                              </svg>
-                            ) : (
-                              <span className="text-emerald-100/85">#</span>
+                        <div key={channel.id} className="space-y-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveChannelId(channel.id);
+                              if (channel.type === 'TEXT') {
+                                setActiveTextChannelId(channel.id);
+                              }
+                            }}
+                            className={cn(
+                              'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                              activeChannelId === channel.id
+                                ? 'border-emerald-200/45 bg-white/10'
+                                : 'border-transparent hover:border-white/20 hover:bg-white/5'
                             )}
-                            <span>{channel.name}</span>
-                          </span>
-                        </button>
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              {channel.type === 'VOICE' ? (
+                                <svg
+                                  aria-hidden="true"
+                                  viewBox="0 0 24 24"
+                                  className="h-4 w-4 text-emerald-100/85"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+                                  <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                                  <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+                                </svg>
+                              ) : (
+                                <span className="text-emerald-100/85">#</span>
+                              )}
+                              <span>{channel.name}</span>
+                            </span>
+                          </button>
+
+                          {channel.type === 'VOICE' && activeChannelId === channel.id && voiceParticipants.length > 0 ? (
+                            <div className="flex items-center gap-1.5 px-2">
+                              {voiceParticipants.map((participant) => {
+                                const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
+                                return avatarUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    key={participant.socketId}
+                                    src={avatarUrl}
+                                    alt={participant.displayName}
+                                    title={participant.displayName}
+                                    className="h-6 w-6 rounded-full border border-white/20 object-cover"
+                                  />
+                                ) : (
+                                  <span
+                                    key={participant.socketId}
+                                    title={participant.displayName}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
+                                  >
+                                    {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
                       ))}
                       {channels.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-white/20 p-4 text-xs text-slate-400">
@@ -936,7 +1013,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 ) : null}
                               </div>
                               <div className="sr-only" aria-hidden="true">
-                                <VoiceRoom channelId={activeChannel.id} socket={socket} />
+                                <VoiceRoom channelId={activeChannel.id} socket={socket} onParticipantsChange={setVoiceParticipants} />
                               </div>
                             </>
                           ) : (
