@@ -93,6 +93,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isOutputMuted, setIsOutputMuted] = useState(false);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
+  const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState(false);
 
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -120,10 +121,20 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     [activeChatChannelId, channels]
   );
   const isVoiceChannelActive = activeChannel?.type === 'VOICE';
-  const isVoiceConnected = useMemo(
-    () => Boolean(isVoiceChannelActive && user?.id && voiceParticipants.some((participant) => participant.userId === user.id)),
-    [isVoiceChannelActive, user?.id, voiceParticipants]
-  );
+  const canShowVoiceActions = Boolean(isVoiceChannelActive && user);
+  const displayedVoiceParticipants = useMemo(() => {
+    if (!isVoiceChannelActive || !user) return voiceParticipants;
+    if (voiceParticipants.some((participant) => participant.userId === user.id)) return voiceParticipants;
+    return [
+      {
+        socketId: `local-${user.id}`,
+        userId: user.id,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl ?? null
+      },
+      ...voiceParticipants
+    ];
+  }, [isVoiceChannelActive, user, voiceParticipants]);
   const accountAvatarUrl = useMemo(() => resolveAssetUrl(user?.avatarUrl ?? null), [user?.avatarUrl]);
   const accountInitial = useMemo(() => user?.displayName.trim().charAt(0).toUpperCase() || '?', [user?.displayName]);
 
@@ -286,6 +297,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (isVoiceChannelActive) return;
     setVoiceParticipants([]);
     setIsSharingScreen(false);
+    setIsVoiceSettingsOpen(false);
   }, [isVoiceChannelActive]);
 
   useEffect(() => {
@@ -525,6 +537,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const disconnectVoice = () => {
     if (!isVoiceChannelActive) return;
+    socket?.emit('voice:leave');
     setIsSharingScreen(false);
     setVoiceParticipants([]);
     if (activeTextChannelId) {
@@ -779,7 +792,24 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                       </svg>
                     </button>
 
-                    {isVoiceConnected ? (
+                    <button
+                      type="button"
+                      aria-label="Voice settings"
+                      title="Voice settings"
+                      aria-pressed={isVoiceSettingsOpen}
+                      onClick={() => setIsVoiceSettingsOpen((current) => !current)}
+                      className={cn(
+                        'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
+                        isVoiceSettingsOpen ? 'border-emerald-200/40 bg-emerald-300/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                      )}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.82l.02.02a2 2 0 0 1-2.82 2.82l-.02-.02A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1V21a2 2 0 1 1-4 0v-.04a1.7 1.7 0 0 0-.4-1 1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.82.34l-.02.02a2 2 0 1 1-2.82-2.82l.02-.02A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1-.4H3a2 2 0 1 1 0-4h.04a1.7 1.7 0 0 0 1-.4 1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.82l-.02-.02a2 2 0 1 1 2.82-2.82l.02.02A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1V3a2 2 0 1 1 4 0v.04a1.7 1.7 0 0 0 .4 1 1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.82-.34l.02-.02a2 2 0 1 1 2.82 2.82l-.02.02A1.7 1.7 0 0 0 19.4 9c.29.3.47.68.6 1 .08.32.1.66.06 1 .04.34.02.68-.06 1-.13.32-.31.7-.6 1Z" />
+                      </svg>
+                    </button>
+
+                    {canShowVoiceActions ? (
                       <>
                         <button
                           type="button"
@@ -962,9 +992,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             </span>
                           </button>
 
-                          {channel.type === 'VOICE' && activeChannelId === channel.id && voiceParticipants.length > 0 ? (
-                            <div className="flex items-center gap-1.5 px-2">
-                              {voiceParticipants.map((participant) => {
+                  {channel.type === 'VOICE' && activeChannelId === channel.id && displayedVoiceParticipants.length > 0 ? (
+                    <div className="flex items-center gap-1.5 px-2">
+                              {displayedVoiceParticipants.map((participant) => {
                                 const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
                                 return avatarUrl ? (
                                   // eslint-disable-next-line @next/next/no-img-element
