@@ -101,6 +101,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [activeChannelId, setActiveChannelId] = useState('');
   const [activeTextChannelId, setActiveTextChannelId] = useState('');
   const [connectedVoiceChannelId, setConnectedVoiceChannelId] = useState('');
+  const [connectedVoiceChannelName, setConnectedVoiceChannelName] = useState('');
   const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [threadParent, setThreadParent] = useState<Message | null>(null);
@@ -120,10 +121,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const activeChatChannel = useMemo(
     () => channels.find((channel) => channel.id === activeChatChannelId) ?? null,
     [activeChatChannelId, channels]
-  );
-  const connectedVoiceChannel = useMemo(
-    () => channels.find((channel) => channel.id === connectedVoiceChannelId && channel.type === 'VOICE') ?? null,
-    [channels, connectedVoiceChannelId]
   );
   const isVoiceConnected = Boolean(connectedVoiceChannelId);
   const canShowVoiceActions = Boolean(isVoiceConnected && user);
@@ -159,6 +156,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setError(null);
       setActiveServerId(null);
       setConnectedVoiceChannelId('');
+      setConnectedVoiceChannelName('');
       setIsOpeningServerView(false);
       setJoinModalOpen(false);
       setServerModalTab('join');
@@ -547,6 +545,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     setIsSharingScreen(false);
     setVoiceParticipants([]);
     setConnectedVoiceChannelId('');
+    setConnectedVoiceChannelName('');
     if (activeTextChannelId) {
       setActiveChannelId(activeTextChannelId);
       return;
@@ -761,7 +760,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     <p className="truncate text-sm font-semibold text-white">{user.displayName}</p>
                     {isVoiceConnected ? (
                       <div className="truncate rounded-md border border-emerald-200/30 bg-emerald-300/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-100">
-                        Voice: {connectedVoiceChannel?.name ?? 'Connected'}
+                        Voice: {connectedVoiceChannelName || 'Connected'}
                       </div>
                     ) : null}
                   </div>
@@ -974,7 +973,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               if (channel.type === 'TEXT') {
                                 setActiveTextChannelId(channel.id);
                               } else if (channel.type === 'VOICE') {
-                                setConnectedVoiceChannelId(channel.id);
+                                if (!connectedVoiceChannelId || connectedVoiceChannelId === channel.id) {
+                                  setConnectedVoiceChannelId(channel.id);
+                                  setConnectedVoiceChannelName(channel.name);
+                                }
                               }
                             }}
                             className={cn(
