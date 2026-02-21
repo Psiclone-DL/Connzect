@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { ConnzectServer } from '@/types';
 import { cn } from '@/lib/utils';
 import styles from './landing-page.module.css';
@@ -25,16 +26,42 @@ const getInitials = (name: string) => {
 
 export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen }: ServerCardProps) => {
   const initials = getInitials(server.name);
+  const [isClickAnimating, setIsClickAnimating] = useState(false);
+  const clickTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (clickTimerRef.current) {
+        window.clearTimeout(clickTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const handleOpen = () => {
+    if (clickTimerRef.current) {
+      window.clearTimeout(clickTimerRef.current);
+    }
+
+    setIsClickAnimating(true);
+    clickTimerRef.current = window.setTimeout(() => {
+      setIsClickAnimating(false);
+      clickTimerRef.current = null;
+    }, 280);
+
+    onOpen(server.id);
+  };
 
   return (
     <button
       type="button"
       title={server.name}
-      onClick={() => onOpen(server.id)}
+      onClick={handleOpen}
       className={cn(
         styles.surface,
         styles.cardLift,
         isActive ? styles.serverActive : '',
+        isClickAnimating ? styles.serverClickPulse : '',
         'group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition',
         collapsed ? 'justify-center px-2' : ''
       )}

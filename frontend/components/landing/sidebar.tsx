@@ -9,6 +9,7 @@ interface SidebarProps {
   collapsed?: boolean;
   className?: string;
   onOpenServer: (serverId: string) => void;
+  onJoinServer?: () => void;
   onServerPicked?: () => void;
 }
 
@@ -18,6 +19,7 @@ export const Sidebar = ({
   collapsed = false,
   className,
   onOpenServer,
+  onJoinServer,
   onServerPicked
 }: SidebarProps) => {
   const handleOpen = (serverId: string) => {
@@ -29,7 +31,23 @@ export const Sidebar = ({
     <aside className={cn(styles.surface, 'flex h-full min-h-0 flex-col rounded-3xl border p-3', className)}>
       <div className={cn('mb-3 flex items-center', collapsed ? 'justify-center' : 'justify-between')}>
         <p className={cn('text-xs uppercase tracking-[0.24em] text-slate-400', collapsed ? 'hidden' : 'block')}>Servers</p>
-        <div className={cn('h-2 w-2 rounded-full bg-emerald-300/70', collapsed ? 'hidden' : 'block')} />
+        <div className="flex items-center gap-2">
+          {onJoinServer ? (
+            <button
+              type="button"
+              onClick={onJoinServer}
+              className={cn(
+                styles.joinButton,
+                'inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-base leading-none text-emerald-100'
+              )}
+              title="Join by invite link or code"
+              aria-label="Join server by invite link or code"
+            >
+              +
+            </button>
+          ) : null}
+          <div className={cn('h-2 w-2 rounded-full bg-emerald-300/70', collapsed ? 'hidden' : 'block')} />
+        </div>
       </div>
 
       <div className={cn(styles.scrollArea, 'min-h-0 flex-1 space-y-2 overflow-y-auto pr-1')}>

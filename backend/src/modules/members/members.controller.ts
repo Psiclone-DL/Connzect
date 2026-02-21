@@ -55,3 +55,33 @@ export const banMember = async (req: Request, res: Response): Promise<void> => {
 
   res.status(StatusCodes.OK).json({ message: 'Member banned' });
 };
+
+export const leaveServer = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new HttpError(401, 'Unauthorized');
+
+  const serverId = routeParam(req.params.serverId);
+  const server = await prisma.server.findUnique({ where: { id: serverId } });
+  if (!server) {
+    throw new HttpError(404, 'Server not found');
+  }
+
+  if (server.ownerId === req.user.id) {
+    throw new HttpError(400, 'Server owner cannot leave the server');
+  }
+
+  const member = await prisma.serverMember.findUnique({
+    where: {
+      serverId_userId: {
+        serverId,
+        userId: req.user.id
+      }
+    }
+  });
+
+  if (!member) {
+    throw new HttpError(404, 'Membership not found');
+  }
+
+  await prisma.serverMember.delete({ where: { id: member.id } });
+  res.status(StatusCodes.OK).json({ message: 'Left server' });
+};

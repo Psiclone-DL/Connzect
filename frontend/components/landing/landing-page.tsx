@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { CreateServerForm } from '@/components/forms/create-server-form';
@@ -20,6 +20,46 @@ interface LandingPageProps {
   requireAuth?: boolean;
 }
 
+const parseInviteCode = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  if (!/[/?#]/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  try {
+    const url = new URL(normalized);
+    const queryCode =
+      url.searchParams.get('code') ?? url.searchParams.get('invite') ?? url.searchParams.get('inviteCode');
+    if (queryCode) {
+      return decodeURIComponent(queryCode).trim();
+    }
+
+    const parts = url.pathname.split('/').filter(Boolean);
+    const inviteIndex = parts.findIndex((part) =>
+      ['invite', 'invites', 'join', 'server-invite'].includes(part.toLowerCase())
+    );
+
+    if (inviteIndex >= 0 && parts[inviteIndex + 1]) {
+      return decodeURIComponent(parts[inviteIndex + 1]).trim();
+    }
+
+    if (parts.length > 0) {
+      return decodeURIComponent(parts[parts.length - 1]).trim();
+    }
+  } catch {
+    const fallback = trimmed.split('/').filter(Boolean).pop();
+    if (fallback) {
+      return fallback.split('?')[0].split('#')[0].trim();
+    }
+  }
+
+  return '';
+};
+
 export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const router = useRouter();
   const { user, loading, logout, authRequest, accessToken } = useAuth();
@@ -32,6 +72,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [isTabletViewport, setIsTabletViewport] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [isClosingServerView, setIsClosingServerView] = useState(false);
+  const [joinModalOpen, setJoinModalOpen] = useState(false);
+  const [isJoiningInvite, setIsJoiningInvite] = useState(false);
+  const [isLeavingServer, setIsLeavingServer] = useState(false);
 
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -44,17 +87,24 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [dmEmail, setDmEmail] = useState('');
   const closeTimerRef = useRef<number | null>(null);
 
+  const refreshServers = useCallback(async () => {
+    const data = await authRequest<ConnzectServer[]>('/servers');
+    setServers(data);
+    return data;
+  }, [authRequest]);
+
   useEffect(() => {
     if (loading || !user) {
       setServers([]);
       setError(null);
       setActiveServerId(null);
+      setJoinModalOpen(false);
       return;
     }
 
     let mounted = true;
 
-    authRequest<ConnzectServer[]>('/servers')
+    refreshServers()
       .then((data) => {
         if (!mounted) return;
         setServers(data);
@@ -67,7 +117,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     return () => {
       mounted = false;
     };
-  }, [authRequest, loading, user]);
+  }, [loading, refreshServers, user]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -91,6 +141,19 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setTabletSidebarCollapsed(false);
     }
   }, [isTabletViewport]);
+
+  useEffect(() => {
+    if (!joinModalOpen) return;
+
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setJoinModalOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [joinModalOpen]);
 
   useEffect(() => {
     if (!activeServerId) return;
@@ -324,17 +387,65 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const joinInvite = async (event: FormEvent) => {
     event.preventDefault();
-    const code = inviteCode.trim();
+    const code = parseInviteCode(inviteCode);
     if (!code) return;
 
+    setIsJoiningInvite(true);
     try {
-      const joined = await authRequest<{ server: { id: string } }>(`/invites/${code}/join`, {
+      const joined = await authRequest<{ server: ConnzectServer }>(`/invites/${code}/join`, {
         method: 'POST'
       });
+      setError(null);
       setInviteCode('');
+      setJoinModalOpen(false);
+      try {
+        await refreshServers();
+      } catch {
+        setServers((previous) => {
+          if (previous.some((server) => server.id === joined.server.id)) {
+            return previous;
+          }
+          return [joined.server, ...previous];
+        });
+      }
+      setIsClosingServerView(false);
       setActiveServerId(joined.server.id);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to join invite');
+    } finally {
+      setIsJoiningInvite(false);
+    }
+  };
+
+  const leaveServer = async () => {
+    if (!activeServer || !user || isLeavingServer) return;
+
+    if (activeServer.ownerId === user.id) {
+      setError('Transfer ownership before leaving this server.');
+      return;
+    }
+
+    if (!window.confirm(`Leave "${activeServer.name}"?`)) {
+      return;
+    }
+
+    setIsLeavingServer(true);
+    try {
+      await authRequest(`/servers/${activeServer.id}/members/me`, {
+        method: 'DELETE'
+      });
+      setError(null);
+      if (closeTimerRef.current) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+      setServers((previous) => previous.filter((server) => server.id !== activeServer.id));
+      setActiveServerId(null);
+      setIsClosingServerView(false);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to leave server');
+    } finally {
+      setIsLeavingServer(false);
     }
   };
 
@@ -430,12 +541,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
           )}
         >
-            <Sidebar
-              servers={servers}
-              activeServerId={activeServerId}
-              onOpenServer={openServerWidget}
-              onServerPicked={() => setMobileSidebarOpen(false)}
-              className="h-full"
+          <Sidebar
+            servers={servers}
+            activeServerId={activeServerId}
+            onOpenServer={openServerWidget}
+            onJoinServer={user ? () => setJoinModalOpen(true) : undefined}
+            onServerPicked={() => setMobileSidebarOpen(false)}
+            className="h-full"
           />
         </div>
 
@@ -451,6 +563,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               activeServerId={activeServerId}
               collapsed={sidebarCollapsed}
               onOpenServer={openServerWidget}
+              onJoinServer={user ? () => setJoinModalOpen(true) : undefined}
               className="h-[calc(100vh-7.5rem)]"
             />
           </div>
@@ -473,9 +586,23 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   <div>
                     <h2 className="mt-2 text-2xl font-semibold text-white">{activeServer.name}</h2>
                   </div>
-                  <Button variant="soft" onClick={closeServer}>
-                    Close
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="danger"
+                      onClick={leaveServer}
+                      disabled={isLeavingServer || activeServer.ownerId === user?.id}
+                      title={
+                        activeServer.ownerId === user?.id
+                          ? 'Server owners cannot leave their own server'
+                          : 'Leave server'
+                      }
+                    >
+                      {isLeavingServer ? 'Leaving...' : 'Leave'}
+                    </Button>
+                    <Button variant="soft" onClick={closeServer}>
+                      Close
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
@@ -619,16 +746,16 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
                   <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
                     <h3 className="text-base font-semibold text-white">Join by Invite</h3>
-                    <p className="mb-4 mt-1 text-xs text-slate-300">Paste an invite code and enter directly.</p>
+                    <p className="mb-4 mt-1 text-xs text-slate-300">Paste invite code or full invite link.</p>
                     <form className="space-y-2" onSubmit={joinInvite}>
                       <Input
                         required
-                        placeholder="Paste invite code"
+                        placeholder="Invite code or link"
                         value={inviteCode}
                         onChange={(event) => setInviteCode(event.target.value)}
                       />
-                      <Button variant="soft" className="w-full">
-                        Join Server
+                      <Button variant="soft" className="w-full" disabled={isJoiningInvite}>
+                        {isJoiningInvite ? 'Joining...' : 'Join Server'}
                       </Button>
                     </form>
                   </div>
@@ -654,6 +781,49 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             ) : null}
           </main>
         </div>
+
+        {user && joinModalOpen ? (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setJoinModalOpen(false)}
+              aria-label="Close join modal"
+            />
+            <section className={cn(styles.surfaceStrong, styles.fadeIn, 'relative z-[71] w-full max-w-md rounded-3xl border p-5')}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Join Server</p>
+                  <h3 className="mt-2 text-xl font-semibold text-white">Invite link or code</h3>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/10"
+                  onClick={() => setJoinModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <form className="mt-5 space-y-3" onSubmit={joinInvite}>
+                <Input
+                  required
+                  placeholder="https://... or invite code"
+                  value={inviteCode}
+                  onChange={(event) => setInviteCode(event.target.value)}
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <Button type="button" variant="soft" onClick={() => setJoinModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="soft" disabled={isJoiningInvite}>
+                    {isJoiningInvite ? 'Joining...' : 'Join Server'}
+                  </Button>
+                </div>
+              </form>
+            </section>
+          </div>
+        ) : null}
       </div>
     </>
   );
