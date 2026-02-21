@@ -84,6 +84,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [tabletSidebarCollapsed, setTabletSidebarCollapsed] = useState(false);
   const [isTabletViewport, setIsTabletViewport] = useState(false);
   const [isClosingServerView, setIsClosingServerView] = useState(false);
+  const [isOpeningServerView, setIsOpeningServerView] = useState(false);
   const [joinModalOpen, setJoinModalOpen] = useState(false);
   const [serverModalTab, setServerModalTab] = useState<'join' | 'create'>('join');
   const [isJoiningInvite, setIsJoiningInvite] = useState(false);
@@ -99,6 +100,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const [inviteCode, setInviteCode] = useState('');
   const closeTimerRef = useRef<number | null>(null);
+  const openTimerRef = useRef<number | null>(null);
 
   const refreshServers = useCallback(async () => {
     const data = await authRequest<ConnzectServer[]>('/servers');
@@ -108,9 +110,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   useEffect(() => {
     if (loading || !user) {
+      if (openTimerRef.current) {
+        window.clearTimeout(openTimerRef.current);
+        openTimerRef.current = null;
+      }
       setServers([]);
       setError(null);
       setActiveServerId(null);
+      setIsOpeningServerView(false);
       setJoinModalOpen(false);
       setServerModalTab('join');
       return;
@@ -180,6 +187,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     () => () => {
       if (closeTimerRef.current) {
         window.clearTimeout(closeTimerRef.current);
+      }
+      if (openTimerRef.current) {
+        window.clearTimeout(openTimerRef.current);
       }
     },
     []
@@ -431,11 +441,34 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       closeTimerRef.current = null;
     }
 
+    if (openTimerRef.current) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+
     setIsClosingServerView(false);
+
+    if (!activeServerId) {
+      setIsOpeningServerView(true);
+      openTimerRef.current = window.setTimeout(() => {
+        setActiveServerId(serverId);
+        setIsOpeningServerView(false);
+        openTimerRef.current = null;
+      }, 220);
+      return;
+    }
+
+    setIsOpeningServerView(false);
     setActiveServerId(serverId);
   };
 
   const closeServer = () => {
+    if (openTimerRef.current) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+      setIsOpeningServerView(false);
+    }
+
     if (!activeServerId || isClosingServerView) return;
 
     setIsClosingServerView(true);
@@ -544,6 +577,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         });
       }
       setIsClosingServerView(false);
+      setIsOpeningServerView(false);
       setActiveServerId(joined.server.id);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to join invite');
@@ -577,6 +611,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setServers((previous) => previous.filter((server) => server.id !== activeServer.id));
       setActiveServerId(null);
       setIsClosingServerView(false);
+      setIsOpeningServerView(false);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to leave server');
     } finally {
@@ -599,6 +634,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     setJoinModalOpen(false);
     setServerModalTab('join');
     setIsClosingServerView(false);
+    setIsOpeningServerView(false);
     setActiveServerId(server.id);
     setError(null);
   };
@@ -871,7 +907,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                 </div>
               </section>
             ) : (
-              <section className={cn(styles.surface, styles.fadeIn, styles.panelIn, 'rounded-3xl border p-6')}>
+              <section
+                className={cn(styles.surface, styles.fadeIn, isOpeningServerView ? styles.panelOut : styles.panelIn, 'rounded-3xl border p-6')}
+              >
                 <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
                   <article className="rounded-2xl border border-white/10 bg-black/15 p-5">
                     <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">News Feed</p>
