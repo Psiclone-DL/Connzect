@@ -131,11 +131,27 @@ const setupAutoUpdates = () => {
     }
 
     installingUpdate = true;
-    log('Installing update in background and restarting app...');
+    log('Installing update silently and restarting app...');
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        // Prevent visible flicker/crash-like feel while installer takes over.
+        mainWindow.setOpacity(0);
+        mainWindow.minimize();
+      } catch (error) {
+        log('Failed to transition window before update:', error?.message || String(error));
+      }
+    }
 
     setTimeout(() => {
-      autoUpdater.quitAndInstall(false, true);
-    }, 1200);
+      try {
+        // isSilent=true, isForceRunAfter=true
+        autoUpdater.quitAndInstall(true, true);
+      } catch (error) {
+        log('Silent quitAndInstall failed, falling back to app.quit():', error?.message || String(error));
+        app.quit();
+      }
+    }, 900);
   });
 
   log('Using GitHub Releases auto-update provider.');
