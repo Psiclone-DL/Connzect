@@ -30,6 +30,11 @@ const includeAuthor = {
 } as const;
 
 const voiceParticipants = new Map<string, Map<string, VoiceParticipant>>();
+const assertTextChannel = (channelType: 'TEXT' | 'VOICE'): void => {
+  if (channelType !== 'TEXT') {
+    throw new Error('Voice channels do not support text chat');
+  }
+};
 
 const broadcastVoiceParticipants = (io: Server, channelId: string): void => {
   const participants = Array.from(voiceParticipants.get(channelId)?.values() ?? []);
@@ -48,6 +53,8 @@ const ensureChannelMessagingAccess = async (channelId: string, userId: string) =
   if (!hasPermission(effective, Permission.VIEW_CHANNEL)) {
     throw new Error('Missing VIEW_CHANNEL permission');
   }
+
+  assertTextChannel(channel.type);
 
   return { channel, effective };
 };

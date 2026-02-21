@@ -101,6 +101,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [inviteCode, setInviteCode] = useState('');
   const closeTimerRef = useRef<number | null>(null);
   const openTimerRef = useRef<number | null>(null);
+  const activeChannel = useMemo(
+    () => channels.find((channel) => channel.id === activeChannelId) ?? null,
+    [activeChannelId, channels]
+  );
 
   const refreshServers = useCallback(async () => {
     const data = await authRequest<ConnzectServer[]>('/servers');
@@ -244,7 +248,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   }, [activeChannelId, channels]);
 
   useEffect(() => {
-    if (!activeChannelId) {
+    if (!activeChannelId || !activeChannel || activeChannel.type === 'VOICE') {
       setMessages([]);
       setThreadParent(null);
       setThreadMessages([]);
@@ -260,18 +264,18 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       .catch((nextError) => {
         setError(nextError instanceof Error ? nextError.message : 'Failed loading messages');
       });
-  }, [activeChannelId, authRequest]);
+  }, [activeChannel, activeChannelId, authRequest]);
 
   useEffect(() => {
-    if (!threadParent || !activeChannelId) return;
+    if (!threadParent || !activeChannelId || !activeChannel || activeChannel.type === 'VOICE') return;
 
     authRequest<Message[]>(`/channels/${activeChannelId}/messages?limit=50&parentMessageId=${threadParent.id}`)
       .then(setThreadMessages)
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Failed loading thread'));
-  }, [activeChannelId, authRequest, threadParent]);
+  }, [activeChannel, activeChannelId, authRequest, threadParent]);
 
   useEffect(() => {
-    if (!socket || !activeChannelId) return;
+    if (!socket || !activeChannelId || !activeChannel || activeChannel.type === 'VOICE') return;
 
     const joinChannel = () => {
       socket.emit('channel:join', { channelId: activeChannelId });
@@ -327,16 +331,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       socket.off('error:event', onError);
       socket.off('connect', joinChannel);
     };
-  }, [activeChannelId, socket, threadParent]);
+  }, [activeChannel, activeChannelId, socket, threadParent]);
 
   const activeServer = useMemo(
     () => (activeServerId ? servers.find((server) => server.id === activeServerId) ?? null : null),
     [activeServerId, servers]
-  );
-
-  const activeChannel = useMemo(
-    () => channels.find((channel) => channel.id === activeChannelId) ?? null,
-    [activeChannelId, channels]
   );
 
   const rankedMembers = useMemo(() => {
@@ -510,6 +509,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const sendMessage = async (content: string, parentMessageId?: string) => {
     if (!activeChannelId) return;
+    if (!activeChannel || activeChannel.type === 'VOICE') {
+      setError('Voice channels do not support text chat');
+      return;
+    }
 
     if (!socket?.connected) {
       const created = await authRequest<Message>(`/channels/${activeChannelId}/messages`, {
@@ -525,6 +528,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const editMessage = async (messageId: string, content: string) => {
     if (!activeChannelId) return;
+    if (!activeChannel || activeChannel.type === 'VOICE') {
+      setError('Voice channels do not support text chat');
+      return;
+    }
 
     if (!socket?.connected) {
       const updated = await authRequest<Message>(`/channels/${activeChannelId}/messages/${messageId}`, {
@@ -540,6 +547,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const deleteMessage = async (messageId: string) => {
     if (!activeChannelId) return;
+    if (!activeChannel || activeChannel.type === 'VOICE') {
+      setError('Voice channels do not support text chat');
+      return;
+    }
 
     if (!socket?.connected) {
       const deleted = await authRequest<{ id: string }>(`/channels/${activeChannelId}/messages/${messageId}`, {
@@ -817,8 +828,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
                   <section className="rounded-2xl border border-white/10 bg-black/15 p-4">
                     {activeChannel ? (
-                      activeChannel.type === 'VOICE' && socket ? (
-                        <VoiceRoom channelId={activeChannel.id} socket={socket} />
+                      activeChannel.type === 'VOICE' ? (
+                        socket ? (
+                          <VoiceRoom channelId={activeChannel.id} socket={socket} />
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-white/20 p-6 text-sm text-slate-300">
+                            Voice channel selected. Realtime connection is required to join voice.
+                          </div>
+                        )
                       ) : (
                         <div className={`grid gap-4 ${threadParent ? 'lg:grid-cols-[1.6fr_1fr]' : ''}`}>
                           <div>

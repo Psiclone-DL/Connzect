@@ -16,6 +16,12 @@ const includeAuthor = {
   }
 } as const;
 
+const assertTextChannel = (channelType: 'TEXT' | 'VOICE'): void => {
+  if (channelType !== 'TEXT') {
+    throw new HttpError(400, 'Voice channels do not support text chat');
+  }
+};
+
 const ensureChannelAccess = async (channelId: string, userId: string) => {
   const channel = await prisma.channel.findUnique({ where: { id: channelId } });
 
@@ -53,7 +59,8 @@ export const getMessages = async (req: Request, res: Response): Promise<void> =>
   const limit = Number(req.query.limit ?? 50);
   const parentMessageId = typeof req.query.parentMessageId === 'string' ? req.query.parentMessageId : undefined;
 
-  await ensureChannelAccess(channelId, req.user.id);
+  const { channel } = await ensureChannelAccess(channelId, req.user.id);
+  assertTextChannel(channel.type);
 
   if (parentMessageId) {
     await assertParentBelongsToChannel(channelId, parentMessageId);
@@ -81,7 +88,8 @@ export const createMessage = async (req: Request, res: Response): Promise<void> 
 
   const channelId = routeParam(req.params.channelId);
   const parentMessageId = req.body.parentMessageId as string | undefined;
-  const { effective } = await ensureChannelAccess(channelId, req.user.id);
+  const { channel, effective } = await ensureChannelAccess(channelId, req.user.id);
+  assertTextChannel(channel.type);
 
   if (!hasPermission(effective, Permission.SEND_MESSAGE)) {
     throw new HttpError(403, 'Missing SEND_MESSAGE permission');
@@ -109,7 +117,8 @@ export const updateMessage = async (req: Request, res: Response): Promise<void> 
 
   const channelId = routeParam(req.params.channelId);
   const messageId = routeParam(req.params.messageId);
-  const { effective } = await ensureChannelAccess(channelId, req.user.id);
+  const { channel, effective } = await ensureChannelAccess(channelId, req.user.id);
+  assertTextChannel(channel.type);
 
   const message = await prisma.message.findFirst({
     where: {
@@ -149,7 +158,8 @@ export const deleteMessage = async (req: Request, res: Response): Promise<void> 
 
   const channelId = routeParam(req.params.channelId);
   const messageId = routeParam(req.params.messageId);
-  const { effective } = await ensureChannelAccess(channelId, req.user.id);
+  const { channel, effective } = await ensureChannelAccess(channelId, req.user.id);
+  assertTextChannel(channel.type);
 
   const message = await prisma.message.findFirst({
     where: {

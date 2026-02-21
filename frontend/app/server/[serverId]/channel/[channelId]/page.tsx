@@ -30,6 +30,10 @@ export default function ChannelPage() {
   const [threadParent, setThreadParent] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const activeChannel = useMemo(
+    () => channels.find((channel) => channel.id === channelId) ?? serverDetails?.channels.find((channel) => channel.id === channelId),
+    [channelId, channels, serverDetails?.channels]
+  );
 
   useEffect(() => {
     if (params.serverId) setServerId(params.serverId);
@@ -59,7 +63,12 @@ export default function ChannelPage() {
   }, [authRequest, serverId]);
 
   useEffect(() => {
-    if (!channelId) return;
+    if (!channelId || !activeChannel || activeChannel.type === 'VOICE') {
+      setMessages([]);
+      setThreadParent(null);
+      setThreadMessages([]);
+      return;
+    }
 
     authRequest<Message[]>(`/channels/${channelId}/messages?limit=50`)
       .then((loaded) => {
@@ -68,18 +77,18 @@ export default function ChannelPage() {
         setThreadMessages([]);
       })
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Failed loading messages'));
-  }, [authRequest, channelId]);
+  }, [activeChannel, authRequest, channelId]);
 
   useEffect(() => {
-    if (!threadParent || !channelId) return;
+    if (!threadParent || !channelId || !activeChannel || activeChannel.type === 'VOICE') return;
 
     authRequest<Message[]>(`/channels/${channelId}/messages?limit=50&parentMessageId=${threadParent.id}`)
       .then(setThreadMessages)
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Failed loading thread'));
-  }, [authRequest, channelId, threadParent]);
+  }, [activeChannel, authRequest, channelId, threadParent]);
 
   useEffect(() => {
-    if (!socket || !channelId) return;
+    if (!socket || !channelId || !activeChannel || activeChannel.type === 'VOICE') return;
 
     const joinChannel = () => {
       socket.emit('channel:join', { channelId });
@@ -135,12 +144,7 @@ export default function ChannelPage() {
       socket.off('error:event', onError);
       socket.off('connect', joinChannel);
     };
-  }, [channelId, socket, threadParent]);
-
-  const activeChannel = useMemo(
-    () => channels.find((channel) => channel.id === channelId) ?? serverDetails?.channels.find((channel) => channel.id === channelId),
-    [channelId, channels, serverDetails?.channels]
-  );
+  }, [activeChannel, channelId, socket, threadParent]);
 
   const upsertMessageLocal = (message: Message) => {
     if (message.parentMessageId) {
@@ -169,6 +173,10 @@ export default function ChannelPage() {
 
   const sendMessage = async (content: string, parentMessageId?: string) => {
     if (!channelId) return;
+    if (!activeChannel || activeChannel.type === 'VOICE') {
+      setError('Voice channels do not support text chat');
+      return;
+    }
 
     if (!socket?.connected) {
       const created = await authRequest<Message>(`/channels/${channelId}/messages`, {
@@ -184,6 +192,10 @@ export default function ChannelPage() {
 
   const editMessage = async (messageId: string, content: string) => {
     if (!channelId) return;
+    if (!activeChannel || activeChannel.type === 'VOICE') {
+      setError('Voice channels do not support text chat');
+      return;
+    }
 
     if (!socket?.connected) {
       const updated = await authRequest<Message>(`/channels/${channelId}/messages/${messageId}`, {
@@ -199,6 +211,10 @@ export default function ChannelPage() {
 
   const deleteMessage = async (messageId: string) => {
     if (!channelId) return;
+    if (!activeChannel || activeChannel.type === 'VOICE') {
+      setError('Voice channels do not support text chat');
+      return;
+    }
 
     if (!socket?.connected) {
       const deleted = await authRequest<{ id: string }>(`/channels/${channelId}/messages/${messageId}`, {
@@ -248,8 +264,14 @@ export default function ChannelPage() {
             </Panel>
 
             <Panel className="p-5">
-              {activeChannel?.type === 'VOICE' && socket ? (
-                <VoiceRoom channelId={channelId} socket={socket} />
+              {activeChannel?.type === 'VOICE' ? (
+                socket ? (
+                  <VoiceRoom channelId={channelId} socket={socket} />
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-white/20 p-6 text-sm text-slate-300">
+                    Voice channel selected. Realtime connection is required to join voice.
+                  </div>
+                )
               ) : (
                 <div className={`grid gap-4 ${threadParent ? 'lg:grid-cols-[1.6fr_1fr]' : ''}`}>
                   <div>
