@@ -100,6 +100,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [serverMembers, setServerMembers] = useState<ServerDetails['members']>([]);
   const [activeChannelId, setActiveChannelId] = useState('');
   const [activeTextChannelId, setActiveTextChannelId] = useState('');
+  const [connectedVoiceChannelId, setConnectedVoiceChannelId] = useState('');
   const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [threadParent, setThreadParent] = useState<Message | null>(null);
@@ -120,10 +121,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     () => channels.find((channel) => channel.id === activeChatChannelId) ?? null,
     [activeChatChannelId, channels]
   );
-  const isVoiceChannelActive = activeChannel?.type === 'VOICE';
-  const canShowVoiceActions = Boolean(isVoiceChannelActive && user);
+  const connectedVoiceChannel = useMemo(
+    () => channels.find((channel) => channel.id === connectedVoiceChannelId && channel.type === 'VOICE') ?? null,
+    [channels, connectedVoiceChannelId]
+  );
+  const isVoiceConnected = Boolean(connectedVoiceChannelId);
+  const canShowVoiceActions = Boolean(isVoiceConnected && user);
   const displayedVoiceParticipants = useMemo(() => {
-    if (!isVoiceChannelActive || !user) return voiceParticipants;
+    if (!isVoiceConnected || !user) return voiceParticipants;
     if (voiceParticipants.some((participant) => participant.userId === user.id)) return voiceParticipants;
     return [
       {
@@ -134,7 +139,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       },
       ...voiceParticipants
     ];
-  }, [isVoiceChannelActive, user, voiceParticipants]);
+  }, [isVoiceConnected, user, voiceParticipants]);
   const accountAvatarUrl = useMemo(() => resolveAssetUrl(user?.avatarUrl ?? null), [user?.avatarUrl]);
   const accountInitial = useMemo(() => user?.displayName.trim().charAt(0).toUpperCase() || '?', [user?.displayName]);
 
@@ -153,6 +158,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setServers([]);
       setError(null);
       setActiveServerId(null);
+      setConnectedVoiceChannelId('');
       setIsOpeningServerView(false);
       setJoinModalOpen(false);
       setServerModalTab('join');
@@ -294,11 +300,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   }, [activeChannel, activeTextChannelId]);
 
   useEffect(() => {
-    if (isVoiceChannelActive) return;
+    if (isVoiceConnected) return;
     setVoiceParticipants([]);
     setIsSharingScreen(false);
     setIsVoiceSettingsOpen(false);
-  }, [isVoiceChannelActive]);
+  }, [isVoiceConnected]);
 
   useEffect(() => {
     if (!activeChatChannelId || !activeChatChannel || activeChatChannel.type !== 'TEXT') {
@@ -536,10 +542,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   };
 
   const disconnectVoice = () => {
-    if (!isVoiceChannelActive) return;
+    if (!isVoiceConnected) return;
     socket?.emit('voice:leave');
     setIsSharingScreen(false);
     setVoiceParticipants([]);
+    setConnectedVoiceChannelId('');
     if (activeTextChannelId) {
       setActiveChannelId(activeTextChannelId);
       return;
@@ -961,6 +968,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               setActiveChannelId(channel.id);
                               if (channel.type === 'TEXT') {
                                 setActiveTextChannelId(channel.id);
+                              } else if (channel.type === 'VOICE') {
+                                setConnectedVoiceChannelId(channel.id);
                               }
                             }}
                             className={cn(
@@ -993,7 +1002,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             </span>
                           </button>
 
-                  {channel.type === 'VOICE' && activeChannelId === channel.id && displayedVoiceParticipants.length > 0 ? (
+                  {channel.type === 'VOICE' && connectedVoiceChannelId === channel.id && displayedVoiceParticipants.length > 0 ? (
                     <div className="flex items-center gap-1.5 px-2">
                               {displayedVoiceParticipants.map((participant) => {
                                 const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
@@ -1029,29 +1038,28 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   </aside>
 
                   <section className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    {connectedVoiceChannelId && socket ? (
+                      <div className="sr-only" aria-hidden="true">
+                        <VoiceRoom channelId={connectedVoiceChannelId} socket={socket} onParticipantsChange={setVoiceParticipants} />
+                      </div>
+                    ) : null}
                     {activeChannel ? (
                       <>
-                        {activeChannel.type === 'VOICE' ? (
-                          socket ? (
-                            <>
-                              <div className="mb-3 rounded-xl border border-emerald-200/20 bg-emerald-200/10 px-3 py-2 text-xs text-emerald-100">
-                                Connected to voice: <span className="font-semibold">{activeChannel.name}</span>
-                                {activeChatChannel ? (
-                                  <>
-                                    {' '}
-                                    • Chat stays on <span className="font-semibold">#{activeChatChannel.name}</span>
-                                  </>
-                                ) : null}
-                              </div>
-                              <div className="sr-only" aria-hidden="true">
-                                <VoiceRoom channelId={activeChannel.id} socket={socket} onParticipantsChange={setVoiceParticipants} />
-                              </div>
-                            </>
-                          ) : (
-                            <div className="mb-3 rounded-2xl border border-dashed border-white/20 p-4 text-sm text-slate-300">
-                              Voice channel selected. Realtime connection is required to join voice.
-                            </div>
-                          )
+                        {isVoiceConnected ? (
+                          <div className="mb-3 rounded-xl border border-emerald-200/20 bg-emerald-200/10 px-3 py-2 text-xs text-emerald-100">
+                            Connected to voice:{' '}
+                            <span className="font-semibold">{connectedVoiceChannel?.name ?? 'Voice channel'}</span>
+                            {activeChatChannel ? (
+                              <>
+                                {' '}
+                                • Chat stays on <span className="font-semibold">#{activeChatChannel.name}</span>
+                              </>
+                            ) : null}
+                          </div>
+                        ) : activeChannel.type === 'VOICE' ? (
+                          <div className="mb-3 rounded-2xl border border-dashed border-white/20 p-4 text-sm text-slate-300">
+                            Voice channel selected. Realtime connection is required to join voice.
+                          </div>
                         ) : null}
 
                         {activeChatChannel ? (
