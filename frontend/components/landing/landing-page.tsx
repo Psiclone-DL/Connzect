@@ -571,7 +571,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         return;
       }
 
-      if (!connectedVoiceChannelId || connectedVoiceChannelId === channel.id || options?.forceVoiceJoin) {
+      if (options?.forceVoiceJoin || connectedVoiceChannelId !== channel.id) {
         setConnectedVoiceChannelId(channel.id);
         setConnectedVoiceChannelName(channel.name);
       }
