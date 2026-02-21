@@ -45,8 +45,29 @@
   box-shadow: 0 24px 44px rgba(0, 0, 0, 0.42);
 }
 
+.serverActive {
+  transform: scale(1.05) translateX(4px);
+  border-color: rgba(190, 255, 236, 0.42);
+  background:
+    radial-gradient(90% 180% at 0% 50%, rgba(139, 240, 209, 0.22), rgba(139, 240, 209, 0) 65%),
+    linear-gradient(160deg, rgba(23, 40, 37, 0.96), rgba(12, 23, 21, 0.96));
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(174, 255, 232, 0.16) inset;
+}
+
+.serverActive:hover {
+  transform: scale(1.05) translateX(4px);
+}
+
 .fadeIn {
   animation: fadeInUp 0.5s ease both;
+}
+
+.panelIn {
+  animation: panelIn 0.28s ease both;
+}
+
+.panelOut {
+  animation: panelOut 0.22s ease both;
 }
 
 .fadeDelay1 {
@@ -84,5 +105,29 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes panelOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
   }
 }

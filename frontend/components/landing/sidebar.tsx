@@ -5,6 +5,7 @@ import styles from './landing-page.module.css';
 
 interface SidebarProps {
   servers: ConnzectServer[];
+  activeServerId?: string | null;
   collapsed?: boolean;
   className?: string;
   onOpenServer: (serverId: string) => void;
@@ -13,6 +14,7 @@ interface SidebarProps {
 
 export const Sidebar = ({
   servers,
+  activeServerId,
   collapsed = false,
   className,
   onOpenServer,
@@ -32,7 +34,13 @@ export const Sidebar = ({
 
       <div className={cn(styles.scrollArea, 'min-h-0 flex-1 space-y-2 overflow-y-auto pr-1')}>
         {servers.map((server) => (
-          <ServerCard key={server.id} server={server} collapsed={collapsed} onOpen={handleOpen} />
+          <ServerCard
+            key={server.id}
+            server={server}
+            collapsed={collapsed}
+            isActive={activeServerId === server.id}
+            onOpen={handleOpen}
+          />
         ))}
 
         {servers.length === 0 ? (

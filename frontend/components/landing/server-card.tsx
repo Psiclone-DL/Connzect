@@ -5,6 +5,7 @@ import styles from './landing-page.module.css';
 interface ServerCardProps {
   server: ConnzectServer;
   collapsed?: boolean;
+  isActive?: boolean;
   onOpen: (serverId: string) => void;
 }
 
@@ -22,7 +23,7 @@ const getInitials = (name: string) => {
   return initials || trimmed.slice(0, 2).toUpperCase();
 };
 
-export const ServerCard = ({ server, collapsed = false, onOpen }: ServerCardProps) => {
+export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen }: ServerCardProps) => {
   const initials = getInitials(server.name);
 
   return (
@@ -33,6 +34,7 @@ export const ServerCard = ({ server, collapsed = false, onOpen }: ServerCardProp
       className={cn(
         styles.surface,
         styles.cardLift,
+        isActive ? styles.serverActive : '',
         'group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition',
         collapsed ? 'justify-center px-2' : ''
       )}
@@ -42,7 +44,6 @@ export const ServerCard = ({ server, collapsed = false, onOpen }: ServerCardProp
       </div>
       <div className={cn('min-w-0', collapsed ? 'hidden' : 'block')}>
         <p className="truncate text-sm font-medium text-slate-100">{server.name}</p>
-        <p className="mt-0.5 text-xs text-emerald-100/60">Server</p>
       </div>
     </button>
   );

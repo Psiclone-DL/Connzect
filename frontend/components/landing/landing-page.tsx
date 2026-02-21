@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { CreateServerForm } from '@/components/forms/create-server-form';
@@ -31,6 +31,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [tabletSidebarCollapsed, setTabletSidebarCollapsed] = useState(false);
   const [isTabletViewport, setIsTabletViewport] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [isClosingServerView, setIsClosingServerView] = useState(false);
 
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -41,6 +42,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const [inviteCode, setInviteCode] = useState('');
   const [dmEmail, setDmEmail] = useState('');
+  const closeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (loading || !user) {
@@ -96,6 +98,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setActiveServerId(null);
     }
   }, [activeServerId, servers]);
+
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!activeServerId) {
@@ -219,7 +230,29 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   );
 
   const openServerWidget = (serverId: string) => {
+    if (activeServerId === serverId) {
+      closeServer();
+      return;
+    }
+
+    if (closeTimerRef.current) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+
+    setIsClosingServerView(false);
     setActiveServerId(serverId);
+  };
+
+  const closeServer = () => {
+    if (!activeServerId || isClosingServerView) return;
+
+    setIsClosingServerView(true);
+    closeTimerRef.current = window.setTimeout(() => {
+      setActiveServerId(null);
+      setIsClosingServerView(false);
+      closeTimerRef.current = null;
+    }, 220);
   };
 
   const handleLogout = () => {
@@ -397,11 +430,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
           )}
         >
-          <Sidebar
-            servers={servers}
-            onOpenServer={openServerWidget}
-            onServerPicked={() => setMobileSidebarOpen(false)}
-            className="h-full"
+            <Sidebar
+              servers={servers}
+              activeServerId={activeServerId}
+              onOpenServer={openServerWidget}
+              onServerPicked={() => setMobileSidebarOpen(false)}
+              className="h-full"
           />
         </div>
 
@@ -414,6 +448,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
           >
             <Sidebar
               servers={servers}
+              activeServerId={activeServerId}
               collapsed={sidebarCollapsed}
               onOpenServer={openServerWidget}
               className="h-[calc(100vh-7.5rem)]"
@@ -426,23 +461,28 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             ) : null}
 
             {activeServer ? (
-              <section className={cn(styles.surfaceStrong, styles.fadeIn, 'rounded-3xl border p-6')}>
+              <section
+                className={cn(
+                  styles.surfaceStrong,
+                  styles.fadeIn,
+                  isClosingServerView ? styles.panelOut : styles.panelIn,
+                  'rounded-3xl border p-6'
+                )}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Server</p>
                     <h2 className="mt-2 text-2xl font-semibold text-white">{activeServer.name}</h2>
                     <p className="mt-1 text-sm text-slate-200/90">
                       {activeChannel ? `Channel: #${activeChannel.name}` : 'Select a channel to start chatting.'}
                     </p>
                   </div>
-                  <Button variant="soft" onClick={() => setActiveServerId(null)}>
+                  <Button variant="soft" onClick={closeServer}>
                     Close
                   </Button>
                 </div>
 
                 <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
                   <aside className="rounded-2xl border border-white/10 bg-black/15 p-3">
-                    <p className="mb-3 px-1 text-xs uppercase tracking-[0.2em] text-slate-400">Channels</p>
                     <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1">
                       {channels.map((channel) => (
                         <button
@@ -456,8 +496,27 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               : 'border-transparent hover:border-white/20 hover:bg-white/5'
                           )}
                         >
-                          <span>#{channel.name}</span>
-                          <span className="text-xs text-slate-400">{channel.type === 'TEXT' ? 'Text' : 'Voice'}</span>
+                          <span className="inline-flex items-center gap-2">
+                            {channel.type === 'VOICE' ? (
+                              <svg
+                                aria-hidden="true"
+                                viewBox="0 0 24 24"
+                                className="h-4 w-4 text-emerald-100/85"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+                                <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                                <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+                              </svg>
+                            ) : (
+                              <span className="text-emerald-100/85">#</span>
+                            )}
+                            <span>{channel.name}</span>
+                          </span>
                         </button>
                       ))}
                       {channels.length === 0 ? (
@@ -522,8 +581,32 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                 </div>
               </section>
             ) : (
-              <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
-                <p className="text-sm text-slate-300">Select a server from the left sidebar to open Channels and messages here.</p>
+              <section className={cn(styles.surface, styles.fadeIn, styles.panelIn, 'rounded-3xl border p-6')}>
+                <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                  <article className="rounded-2xl border border-white/10 bg-black/15 p-5">
+                    <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">News Feed</p>
+                    <h3 className="mt-2 text-2xl font-semibold text-white">Connzect Updates</h3>
+                    <p className="mt-2 text-sm text-slate-300">
+                      Select a server from the left sidebar to open channels and continue conversations.
+                    </p>
+                    <div className="mt-5 space-y-2 text-sm text-slate-200">
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">Realtime messaging improvements live.</div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">Auto-update channel running on latest release stream.</div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">Workspace latency and reliability optimizations deployed.</div>
+                    </div>
+                  </article>
+
+                  <article className="rounded-2xl border border-white/10 bg-black/15 p-5">
+                    <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Mint Black</p>
+                    <h3 className="mt-2 text-2xl font-semibold text-white">Workspace Overview</h3>
+                    <p className="mt-2 text-sm text-slate-300">
+                      Use the left sidebar to select any server. Channels and messages will open instantly in this page.
+                    </p>
+                    <div className="mt-5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">
+                      Active servers in workspace: <span className="text-emerald-100">{servers.length}</span>
+                    </div>
+                  </article>
+                </div>
               </section>
             )}
 
