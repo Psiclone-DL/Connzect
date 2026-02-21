@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
+import { resolveAssetUrl } from '@/lib/assets';
 import { useSocket } from '@/hooks/use-socket';
 import type { Channel, ConnzectServer, Message, Role, ServerDetails } from '@/types';
 import { Sidebar } from './sidebar';
@@ -89,6 +90,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [serverModalTab, setServerModalTab] = useState<'join' | 'create'>('join');
   const [isJoiningInvite, setIsJoiningInvite] = useState(false);
   const [isLeavingServer, setIsLeavingServer] = useState(false);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isOutputMuted, setIsOutputMuted] = useState(false);
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
 
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -114,6 +118,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     () => channels.find((channel) => channel.id === activeChatChannelId) ?? null,
     [activeChatChannelId, channels]
   );
+  const accountAvatarUrl = useMemo(() => resolveAssetUrl(user?.avatarUrl ?? null), [user?.avatarUrl]);
+  const accountInitial = useMemo(() => user?.displayName.trim().charAt(0).toUpperCase() || '?', [user?.displayName]);
 
   const refreshServers = useCallback(async () => {
     const data = await authRequest<ConnzectServer[]>('/servers');
@@ -699,6 +705,78 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             <div className="ml-auto flex items-center gap-2">
               {user ? (
                 <>
+                  <div className={cn(styles.surface, 'hidden items-center gap-3 rounded-2xl border px-3 py-2 md:flex')}>
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-100/70">Contul meu</p>
+                      <p className="truncate text-sm font-semibold text-white">{user.displayName}</p>
+                    </div>
+
+                    {accountAvatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={accountAvatarUrl} alt={user.displayName} className="h-9 w-9 rounded-xl object-cover" />
+                    ) : (
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-sm font-semibold text-slate-100">
+                        {accountInitial}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        aria-label="Mute microfon"
+                        title="Mute microfon"
+                        aria-pressed={isMicMuted}
+                        onClick={() => setIsMicMuted((current) => !current)}
+                        className={cn(
+                          'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
+                          isMicMuted ? 'border-red-300/40 bg-red-500/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                        )}
+                      >
+                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v4a3 3 0 0 0 3 3Z" />
+                          <path d="M19 11a7 7 0 0 1-14 0" />
+                          <path d="M12 18v3" />
+                          <path d="M8 21h8" />
+                        </svg>
+                      </button>
+
+                      <button
+                        type="button"
+                        aria-label="Mute auz"
+                        title="Mute auz"
+                        aria-pressed={isOutputMuted}
+                        onClick={() => setIsOutputMuted((current) => !current)}
+                        className={cn(
+                          'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
+                          isOutputMuted ? 'border-red-300/40 bg-red-500/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                        )}
+                      >
+                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M3 18v-6a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4v6" />
+                          <path d="M12 18v-6a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4v6" />
+                        </svg>
+                      </button>
+
+                      <button
+                        type="button"
+                        aria-label="Share screen"
+                        title="Share screen"
+                        aria-pressed={isSharingScreen}
+                        onClick={() => setIsSharingScreen((current) => !current)}
+                        className={cn(
+                          'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
+                          isSharingScreen ? 'border-emerald-200/40 bg-emerald-300/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                        )}
+                      >
+                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="3" y="4" width="18" height="13" rx="2" />
+                          <path d="M8 20h8" />
+                          <path d="M12 17v3" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
                   <Button variant="soft" onClick={handleLogout}>
                     Logout
                   </Button>
