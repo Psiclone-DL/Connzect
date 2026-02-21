@@ -757,8 +757,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     </div>
                   )}
 
-                  <div className="hidden min-w-0 sm:block">
+                  <div className="hidden min-w-0 sm:flex sm:w-44 sm:flex-col sm:gap-1">
                     <p className="truncate text-sm font-semibold text-white">{user.displayName}</p>
+                    {isVoiceConnected ? (
+                      <div className="truncate rounded-md border border-emerald-200/30 bg-emerald-300/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-100">
+                        Voice: {connectedVoiceChannel?.name ?? 'Connected'}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -840,14 +845,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                           aria-label="Disconnect voice"
                           title="Disconnect voice"
                           onClick={disconnectVoice}
-                          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-300/40 bg-red-500/20 px-2 text-slate-100 transition hover:bg-red-500/30"
+                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-300/40 bg-red-500/20 px-3 text-xs font-semibold text-slate-100 transition hover:bg-red-500/30"
                         >
-                          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M4 15c4-4 12-4 16 0" />
                             <path d="M10 15l-2 4" />
                             <path d="M14 15l2 4" />
                           </svg>
-                          <span className="hidden text-[11px] font-semibold sm:inline">Disc</span>
+                          <span>Disconnect</span>
                         </button>
                       </>
                     ) : null}
@@ -1045,18 +1050,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     ) : null}
                     {activeChannel ? (
                       <>
-                        {isVoiceConnected ? (
-                          <div className="mb-3 rounded-xl border border-emerald-200/20 bg-emerald-200/10 px-3 py-2 text-xs text-emerald-100">
-                            Connected to voice:{' '}
-                            <span className="font-semibold">{connectedVoiceChannel?.name ?? 'Voice channel'}</span>
-                            {activeChatChannel ? (
-                              <>
-                                {' '}
-                                • Chat stays on <span className="font-semibold">#{activeChatChannel.name}</span>
-                              </>
-                            ) : null}
-                          </div>
-                        ) : activeChannel.type === 'VOICE' ? (
+                        {activeChannel.type === 'VOICE' && !isVoiceConnected ? (
                           <div className="mb-3 rounded-2xl border border-dashed border-white/20 p-4 text-sm text-slate-300">
                             Voice channel selected. Realtime connection is required to join voice.
                           </div>
