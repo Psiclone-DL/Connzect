@@ -16,20 +16,6 @@ import type { Channel, ConnzectServer, DirectConversation, Message } from '@/typ
 import { Sidebar } from './sidebar';
 import styles from './landing-page.module.css';
 
-const getServerInitials = (name: string) => {
-  const trimmed = name.trim();
-  if (!trimmed) return 'SV';
-
-  const initials = trimmed
-    .split(/\s+/)
-    .map((part) => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-
-  return initials || trimmed.slice(0, 2).toUpperCase();
-};
-
 interface LandingPageProps {
   requireAuth?: boolean;
 }
@@ -373,6 +359,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             <div className="ml-auto flex items-center gap-2">
               {user ? (
                 <>
+                  <Button variant="soft" className="hidden sm:inline-flex" onClick={() => setActionsOpen((current) => !current)}>
+                    {actionsOpen ? 'Hide Actions' : 'Workspace Actions'}
+                  </Button>
                   <Button variant="soft" className="hidden sm:inline-flex" onClick={() => router.push('/dm')}>
                     Direct Messages
                   </Button>
@@ -432,73 +421,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
           </div>
 
           <main className="min-w-0 flex-1 space-y-6">
-            <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-5')}>
-              <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Workspace</p>
-              <h1 className="mt-2 text-2xl font-semibold text-white sm:text-3xl">
-                {user ? `Welcome back, ${user.displayName}` : 'Connzect Landing'}
-              </h1>
-              <p className="mt-2 text-sm text-slate-300">
-                {user
-                  ? 'Your mint-black activity board with all server highlights in one place.'
-                  : 'Mint-black overview for your communities, updates, and workspace activity.'}
-              </p>
-              {user ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button variant="soft" onClick={() => setActionsOpen((current) => !current)}>
-                    {actionsOpen ? 'Hide Workspace Actions' : 'Workspace Actions'}
-                  </Button>
-                  <Button variant="soft" onClick={() => router.push('/dm')}>
-                    Open DM Hub
-                  </Button>
-                </div>
-              ) : null}
-            </section>
-
             {user && error ? (
               <section className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-200">{error}</section>
             ) : null}
-
-            <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Servers</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-white">Select a server</h2>
-                </div>
-                <span className="rounded-xl border border-emerald-100/20 bg-emerald-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-emerald-50">
-                  {servers.length} servers
-                </span>
-              </div>
-
-              {servers.length > 0 ? (
-                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {servers.map((server) => (
-                    <button
-                      key={server.id}
-                      type="button"
-                      onClick={() => openServerWidget(server.id)}
-                      className={cn(
-                        styles.cardLift,
-                        'rounded-2xl border border-white/10 bg-black/15 p-4 text-left transition'
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-100/20 bg-emerald-300/10 text-xs font-semibold tracking-[0.14em] text-emerald-100">
-                          {getServerInitials(server.name)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-white">{server.name}</p>
-                          <p className="mt-1 text-xs text-slate-300">Channels</p>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-6 rounded-2xl border border-dashed border-white/20 p-5 text-sm text-slate-300">
-                  No servers available. Create or join one from Workspace Actions.
-                </div>
-              )}
-            </section>
 
             {activeServer ? (
               <section className={cn(styles.surfaceStrong, styles.fadeIn, 'rounded-3xl border p-6')}>
@@ -596,7 +521,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   </section>
                 </div>
               </section>
-            ) : null}
+            ) : (
+              <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
+                <p className="text-sm text-slate-300">Select a server from the left sidebar to open Channels and messages here.</p>
+              </section>
+            )}
 
             {user && actionsOpen ? (
               <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
