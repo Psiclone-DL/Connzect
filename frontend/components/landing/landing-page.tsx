@@ -138,12 +138,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [channelProperties, setChannelProperties] = useState<Channel | null>(null);
   const [memberAudioSettings, setMemberAudioSettings] = useState<Record<string, { volume: number; muted: boolean }>>({});
-  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const [inviteCode, setInviteCode] = useState('');
   const closeTimerRef = useRef<number | null>(null);
   const openTimerRef = useRef<number | null>(null);
-  const actionNoticeTimerRef = useRef<number | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const activeChannel = useMemo(
     () => channels.find((channel) => channel.id === activeChannelId) ?? null,
@@ -265,9 +263,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       }
       if (openTimerRef.current) {
         window.clearTimeout(openTimerRef.current);
-      }
-      if (actionNoticeTimerRef.current) {
-        window.clearTimeout(actionNoticeTimerRef.current);
       }
     },
     []
@@ -557,17 +552,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     });
   }, [rankedMembers]);
 
-  const showActionNotice = useCallback((message: string) => {
-    setActionNotice(message);
-    if (actionNoticeTimerRef.current) {
-      window.clearTimeout(actionNoticeTimerRef.current);
-    }
-    actionNoticeTimerRef.current = window.setTimeout(() => {
-      setActionNotice(null);
-      actionNoticeTimerRef.current = null;
-    }, 2200);
-  }, []);
-
   const resolveContextMenuPosition = useCallback((clientX: number, clientY: number) => {
     const menuWidth = 288;
     const menuHeight = 320;
@@ -611,12 +595,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     async (value: string, label: string) => {
       try {
         await navigator.clipboard.writeText(value);
-        showActionNotice(`${label} copied`);
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : `Failed to copy ${label}`);
       }
     },
-    [showActionNotice]
+    []
   );
 
   const markChannelAsRead = useCallback(
@@ -625,15 +608,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         setThreadParent(null);
         setThreadMessages([]);
       }
-      showActionNotice(`#${channel.name} marked as read`);
     },
-    [activeChatChannelId, showActionNotice]
+    [activeChatChannelId]
   );
 
   const messageMember = useCallback(
     async (member: RankedMemberEntry) => {
       if (member.userId === user?.id) {
-        showActionNotice('You cannot DM yourself');
         return;
       }
 
@@ -647,7 +628,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         setError(nextError instanceof Error ? nextError.message : 'Failed to start conversation');
       }
     },
-    [authRequest, router, showActionNotice, user?.id]
+    [authRequest, router, user?.id]
   );
 
   const updateMemberVolume = useCallback((memberUserId: string, volume: number) => {
@@ -662,11 +643,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const toggleMemberMute = useCallback(
     (member: RankedMemberEntry) => {
-      let nextMuted = false;
       setMemberAudioSettings((previous) => {
         const current = previous[member.userId] ?? { volume: 100, muted: false };
         const muted = !current.muted;
-        nextMuted = muted;
         return {
           ...previous,
           [member.userId]: {
@@ -675,9 +654,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
           }
         };
       });
-      showActionNotice(`${member.displayName} ${nextMuted ? 'muted' : 'unmuted'}`);
     },
-    [showActionNotice]
+    []
   );
 
   const openServerWidget = (serverId: string) => {
@@ -1126,9 +1104,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             {user && error ? (
               <section className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-200">{error}</section>
             ) : null}
-            {actionNotice ? (
-              <section className="rounded-2xl border border-emerald-300/35 bg-emerald-400/10 p-3 text-sm text-emerald-100">{actionNotice}</section>
-            ) : null}
 
             {activeServer ? (
               <section
@@ -1393,18 +1368,19 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             {contextMenu.type === 'channel' ? (
               <>
                 <p className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100/80">#{contextMenu.channel.name}</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    openChannel(contextMenu.channel, { forceVoiceJoin: true });
-                    showActionNotice(`Joined #${contextMenu.channel.name}`);
-                    setContextMenu(null);
-                  }}
-                  className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
-                >
-                  <span>Join channel</span>
-                  <span className="text-xs text-slate-400">Enter</span>
-                </button>
+                {contextMenu.channel.type === 'VOICE' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openChannel(contextMenu.channel, { forceVoiceJoin: true });
+                      setContextMenu(null);
+                    }}
+                    className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                  >
+                    <span>Join channel</span>
+                    <span className="text-xs text-slate-400">Enter</span>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
