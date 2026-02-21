@@ -706,11 +706,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               {user ? (
                 <>
                   <div className={cn(styles.surface, 'hidden items-center gap-3 rounded-2xl border px-3 py-2 md:flex')}>
-                    <div className="min-w-0">
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-100/70">Contul meu</p>
-                      <p className="truncate text-sm font-semibold text-white">{user.displayName}</p>
-                    </div>
-
                     {accountAvatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={accountAvatarUrl} alt={user.displayName} className="h-9 w-9 rounded-xl object-cover" />
@@ -719,6 +714,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                         {accountInitial}
                       </div>
                     )}
+
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{user.displayName}</p>
+                    </div>
 
                     <div className="flex items-center gap-1.5">
                       <button
@@ -752,8 +751,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                         )}
                       >
                         <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M3 18v-6a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4v6" />
-                          <path d="M12 18v-6a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4v6" />
+                          <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+                          <path d="M16 9l5 5" />
+                          <path d="M21 9l-5 5" />
                         </svg>
                       </button>
 
