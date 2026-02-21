@@ -88,12 +88,20 @@ export default function DmConversationPage() {
       setThreadParent((prev) => (prev?.id === message.id ? message : prev));
     };
 
+    const onMessageDeleted = (payload: { id: string; conversationId: string }) => {
+      if (payload.conversationId !== conversationId) return;
+      setMessages((prev) => prev.filter((entry) => entry.id !== payload.id));
+      setThreadMessages((prev) => prev.filter((entry) => entry.id !== payload.id));
+      setThreadParent((prev) => (prev?.id === payload.id ? null : prev));
+    };
+
     const onError = (payload: { scope: string; message: string }) => {
       setError(`${payload.scope}: ${payload.message}`);
     };
 
     socket.on('dm:message:new', onMessage);
     socket.on('dm:message:updated', onMessageUpdated);
+    socket.on('dm:message:deleted', onMessageDeleted);
     socket.on('error:event', onError);
     socket.on('connect', joinConversation);
 
@@ -101,6 +109,7 @@ export default function DmConversationPage() {
       socket.emit('dm:leave', { conversationId });
       socket.off('dm:message:new', onMessage);
       socket.off('dm:message:updated', onMessageUpdated);
+      socket.off('dm:message:deleted', onMessageDeleted);
       socket.off('error:event', onError);
       socket.off('connect', joinConversation);
     };
@@ -134,6 +143,12 @@ export default function DmConversationPage() {
       }
       return [...prev, message];
     });
+  };
+
+  const removeMessageLocal = (messageId: string) => {
+    setMessages((prev) => prev.filter((entry) => entry.id !== messageId));
+    setThreadMessages((prev) => prev.filter((entry) => entry.id !== messageId));
+    setThreadParent((prev) => (prev?.id === messageId ? null : prev));
   };
 
   const sendMessage = async (content: string, parentMessageId?: string) => {
@@ -170,10 +185,10 @@ export default function DmConversationPage() {
     if (!conversationId) return;
 
     if (!socket?.connected) {
-      const deleted = await authRequest<DirectMessage>(`/dm/conversations/${conversationId}/messages/${messageId}`, {
+      const deleted = await authRequest<{ id: string }>(`/dm/conversations/${conversationId}/messages/${messageId}`, {
         method: 'DELETE'
       });
-      upsertMessage(deleted);
+      removeMessageLocal(deleted.id);
       return;
     }
 

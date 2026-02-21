@@ -40,17 +40,27 @@ export const Sidebar = ({
                 styles.joinButton,
                 'inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-base leading-none text-emerald-100'
               )}
-              title="Join by invite link or code"
-              aria-label="Join server by invite link or code"
+              title="Join or create server"
+              aria-label="Join or create server"
             >
               +
             </button>
           ) : null}
+          <span
+            className={cn(
+              'inline-flex min-w-6 items-center justify-center rounded-md border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-200',
+              collapsed ? 'hidden' : 'inline-flex'
+            )}
+            title={`${servers.length} servers`}
+            aria-label={`Server count: ${servers.length}`}
+          >
+            {servers.length}
+          </span>
           <div className={cn('h-2 w-2 rounded-full bg-emerald-300/70', collapsed ? 'hidden' : 'block')} />
         </div>
       </div>
 
-      <div className={cn(styles.scrollArea, 'min-h-0 flex-1 space-y-2 overflow-y-auto pr-1')}>
+      <div className={cn(styles.scrollArea, 'min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto pr-1')}>
         {servers.map((server) => (
           <ServerCard
             key={server.id}

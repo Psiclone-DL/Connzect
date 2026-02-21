@@ -233,16 +233,17 @@ export const setupSocket = (io: Server): void => {
           throw new Error('Cannot delete this message');
         }
 
-        const deleted = await prisma.message.update({
+        const deleted = await prisma.message.delete({
           where: { id: message.id },
-          data: {
-            content: '[deleted]',
-            deletedAt: new Date()
-          },
-          include: includeAuthor
+          select: {
+            id: true
+          }
         });
 
-        io.to(`channel:${payload.channelId}`).emit('message:updated', deleted);
+        io.to(`channel:${payload.channelId}`).emit('message:deleted', {
+          id: deleted.id,
+          channelId: payload.channelId
+        });
       } catch (error) {
         authedSocket.emit('error:event', {
           scope: 'message:delete',
@@ -379,16 +380,17 @@ export const setupSocket = (io: Server): void => {
           throw new Error('Cannot delete this message');
         }
 
-        const deleted = await prisma.directMessage.update({
+        const deleted = await prisma.directMessage.delete({
           where: { id: message.id },
-          data: {
-            content: '[deleted]',
-            deletedAt: new Date()
-          },
-          include: includeAuthor
+          select: {
+            id: true
+          }
         });
 
-        io.to(`dm:${payload.conversationId}`).emit('dm:message:updated', deleted);
+        io.to(`dm:${payload.conversationId}`).emit('dm:message:deleted', {
+          id: deleted.id,
+          conversationId: payload.conversationId
+        });
       } catch (error) {
         authedSocket.emit('error:event', {
           scope: 'dm:message:delete',

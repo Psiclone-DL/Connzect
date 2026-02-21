@@ -65,10 +65,6 @@ export const leaveServer = async (req: Request, res: Response): Promise<void> =>
     throw new HttpError(404, 'Server not found');
   }
 
-  if (server.ownerId === req.user.id) {
-    throw new HttpError(400, 'Server owner cannot leave the server');
-  }
-
   const member = await prisma.serverMember.findUnique({
     where: {
       serverId_userId: {
@@ -80,6 +76,41 @@ export const leaveServer = async (req: Request, res: Response): Promise<void> =>
 
   if (!member) {
     throw new HttpError(404, 'Membership not found');
+  }
+
+  if (server.ownerId === req.user.id) {
+    const nextOwnerMember = await prisma.serverMember.findFirst({
+      where: {
+        serverId,
+        isBanned: false,
+        userId: {
+          not: req.user.id
+        }
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+
+    await prisma.$transaction(async (tx) => {
+      if (nextOwnerMember) {
+        await tx.server.update({
+          where: { id: serverId },
+          data: { ownerId: nextOwnerMember.userId }
+        });
+        await tx.serverMember.delete({ where: { id: member.id } });
+        return;
+      }
+
+      await tx.server.delete({ where: { id: serverId } });
+    });
+
+    res.status(StatusCodes.OK).json({
+      message: nextOwnerMember
+        ? 'Ownership transferred and you left the server'
+        : 'Server deleted because owner left with no remaining members'
+    });
+    return;
   }
 
   await prisma.serverMember.delete({ where: { id: member.id } });

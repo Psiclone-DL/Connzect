@@ -50,7 +50,7 @@
 }
 
 .serverActive {
-  transform: scale(1.05) translateX(4px);
+  transform: none;
   border-color: rgba(190, 255, 236, 0.42);
   background:
     radial-gradient(90% 180% at 0% 50%, rgba(139, 240, 209, 0.22), rgba(139, 240, 209, 0) 65%),
@@ -59,7 +59,7 @@
 }
 
 .serverActive:hover {
-  transform: scale(1.05) translateX(4px);
+  transform: none;
 }
 
 .fadeIn {

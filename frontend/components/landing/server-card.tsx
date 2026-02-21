@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ConnzectServer } from '@/types';
 import { cn } from '@/lib/utils';
+import { resolveAssetUrl } from '@/lib/assets';
 import styles from './landing-page.module.css';
 
 interface ServerCardProps {
@@ -26,8 +27,14 @@ const getInitials = (name: string) => {
 
 export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen }: ServerCardProps) => {
   const initials = getInitials(server.name);
+  const iconUrl = resolveAssetUrl(server.iconUrl);
+  const [showIcon, setShowIcon] = useState(Boolean(iconUrl));
   const [isClickAnimating, setIsClickAnimating] = useState(false);
   const clickTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setShowIcon(Boolean(iconUrl));
+  }, [iconUrl]);
 
   useEffect(
     () => () => {
@@ -67,7 +74,17 @@ export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen
       )}
     >
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-100/20 bg-emerald-300/10 text-xs font-semibold tracking-[0.14em] text-emerald-100">
-        {initials}
+        {showIcon && iconUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={iconUrl}
+            alt={server.name}
+            className="h-10 w-10 rounded-xl object-cover"
+            onError={() => setShowIcon(false)}
+          />
+        ) : (
+          initials
+        )}
       </div>
       <div className={cn('min-w-0', collapsed ? 'hidden' : 'block')}>
         <p className="truncate text-sm font-medium text-slate-100">{server.name}</p>

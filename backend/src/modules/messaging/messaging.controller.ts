@@ -65,6 +65,7 @@ export const getMessages = async (req: Request, res: Response): Promise<void> =>
     where: {
       channelId,
       parentMessageId: parentMessageId ?? null,
+      deletedAt: null,
       ...(cursor ? { createdAt: { lt: cursor } } : {})
     },
     take: limit,
@@ -167,13 +168,11 @@ export const deleteMessage = async (req: Request, res: Response): Promise<void> 
     throw new HttpError(403, 'Cannot delete another member message');
   }
 
-  const deleted = await prisma.message.update({
+  const deleted = await prisma.message.delete({
     where: { id: messageId },
-    data: {
-      content: '[deleted]',
-      deletedAt: new Date()
-    },
-    include: includeAuthor
+    select: {
+      id: true
+    }
   });
 
   res.status(StatusCodes.OK).json(deleted);

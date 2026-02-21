@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { useSocket } from '@/hooks/use-socket';
-import type { Channel, ConnzectServer, DirectConversation, Message } from '@/types';
+import type { Channel, ConnzectServer, Message, Role, ServerDetails } from '@/types';
 import { Sidebar } from './sidebar';
 import styles from './landing-page.module.css';
 
@@ -60,6 +60,19 @@ const parseInviteCode = (value: string): string => {
   return '';
 };
 
+const parsePermissionValue = (value?: string): bigint => {
+  try {
+    return BigInt(value ?? '0');
+  } catch {
+    return 0n;
+  }
+};
+
+const compareBigIntDesc = (left: bigint, right: bigint): number => {
+  if (left === right) return 0;
+  return left > right ? -1 : 1;
+};
+
 export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const router = useRouter();
   const { user, loading, logout, authRequest, accessToken } = useAuth();
@@ -70,21 +83,21 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [tabletSidebarCollapsed, setTabletSidebarCollapsed] = useState(false);
   const [isTabletViewport, setIsTabletViewport] = useState(false);
-  const [actionsOpen, setActionsOpen] = useState(false);
   const [isClosingServerView, setIsClosingServerView] = useState(false);
   const [joinModalOpen, setJoinModalOpen] = useState(false);
+  const [serverModalTab, setServerModalTab] = useState<'join' | 'create'>('join');
   const [isJoiningInvite, setIsJoiningInvite] = useState(false);
   const [isLeavingServer, setIsLeavingServer] = useState(false);
 
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [serverMembers, setServerMembers] = useState<ServerDetails['members']>([]);
   const [activeChannelId, setActiveChannelId] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [threadParent, setThreadParent] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
 
   const [inviteCode, setInviteCode] = useState('');
-  const [dmEmail, setDmEmail] = useState('');
   const closeTimerRef = useRef<number | null>(null);
 
   const refreshServers = useCallback(async () => {
@@ -99,6 +112,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setError(null);
       setActiveServerId(null);
       setJoinModalOpen(false);
+      setServerModalTab('join');
       return;
     }
 
@@ -174,6 +188,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   useEffect(() => {
     if (!activeServerId) {
       setChannels([]);
+      setServerMembers([]);
       setActiveChannelId('');
       setMessages([]);
       setThreadParent(null);
@@ -181,14 +196,27 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       return;
     }
 
-    authRequest<Channel[]>(`/servers/${activeServerId}/channels`)
-      .then((loadedChannels) => {
+    let cancelled = false;
+
+    Promise.all([
+      authRequest<Channel[]>(`/servers/${activeServerId}/channels`),
+      authRequest<ServerDetails>(`/servers/${activeServerId}`)
+    ])
+      .then(([loadedChannels, serverDetails]) => {
+        if (cancelled) return;
         setChannels(loadedChannels);
+        setServerMembers(serverDetails.members);
       })
       .catch((nextError) => {
+        if (cancelled) return;
         setError(nextError instanceof Error ? nextError.message : 'Failed loading channels');
         setChannels([]);
+        setServerMembers([]);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeServerId, authRequest]);
 
   useEffect(() => {
@@ -264,12 +292,20 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setThreadParent((previous) => (previous?.id === message.id ? message : previous));
     };
 
+    const onMessageDeleted = (payload: { id: string; channelId: string }) => {
+      if (payload.channelId !== activeChannelId) return;
+      setMessages((previous) => previous.filter((entry) => entry.id !== payload.id));
+      setThreadMessages((previous) => previous.filter((entry) => entry.id !== payload.id));
+      setThreadParent((previous) => (previous?.id === payload.id ? null : previous));
+    };
+
     const onError = (payload: { scope: string; message: string }) => {
       setError(`${payload.scope}: ${payload.message}`);
     };
 
     socket.on('message:new', onMessage);
     socket.on('message:updated', onMessageUpdated);
+    socket.on('message:deleted', onMessageDeleted);
     socket.on('error:event', onError);
     socket.on('connect', joinChannel);
 
@@ -277,6 +313,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       socket.emit('channel:leave', { channelId: activeChannelId });
       socket.off('message:new', onMessage);
       socket.off('message:updated', onMessageUpdated);
+      socket.off('message:deleted', onMessageDeleted);
       socket.off('error:event', onError);
       socket.off('connect', joinChannel);
     };
@@ -291,6 +328,97 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     () => channels.find((channel) => channel.id === activeChannelId) ?? null,
     [activeChannelId, channels]
   );
+
+  const rankedMembers = useMemo(() => {
+    if (!activeServer || serverMembers.length === 0) return [];
+
+    const ownerBoost = 1n << 62n;
+
+    const ranked = serverMembers
+      .map((member) => {
+        const isOwner = member.userId === activeServer.ownerId;
+        const availableRoles = member.memberRoles
+          .map((memberRole) => memberRole.role)
+          .filter((role): role is Role => Boolean(role));
+
+        const sortedRoles = [...availableRoles].sort((left, right) => {
+          const byPermissions = compareBigIntDesc(
+            parsePermissionValue(left.permissions),
+            parsePermissionValue(right.permissions)
+          );
+          if (byPermissions !== 0) return byPermissions;
+          return right.position - left.position;
+        });
+
+        const topCustomRole = sortedRoles.find((role) => !role.isDefault) ?? null;
+        const topRole = topCustomRole ?? sortedRoles[0] ?? null;
+        const basePower = parsePermissionValue(topRole?.permissions);
+        const power = basePower + (isOwner ? ownerBoost : 0n);
+        const category = isOwner ? topCustomRole?.name ?? 'Founder' : topCustomRole?.name ?? 'Member';
+
+        return {
+          id: member.id,
+          displayName: member.nickname?.trim() || member.user.displayName,
+          initials:
+            (member.nickname?.trim() || member.user.displayName)
+              .split(/\s+/)
+              .map((part) => part[0])
+              .join('')
+              .slice(0, 2)
+              .toUpperCase() || 'MB',
+          isOwner,
+          category,
+          roleLabel: topCustomRole?.name ?? (isOwner ? 'Founder' : 'Member'),
+          roleColor: topCustomRole?.color ?? null,
+          power
+        };
+      })
+      .sort((left, right) => {
+        const byPower = compareBigIntDesc(left.power, right.power);
+        if (byPower !== 0) return byPower;
+        if (left.isOwner !== right.isOwner) return left.isOwner ? -1 : 1;
+        return left.displayName.localeCompare(right.displayName);
+      });
+
+    return ranked.map((entry, index) => ({
+      ...entry,
+      rank: index + 1
+    }));
+  }, [activeServer, serverMembers]);
+
+  const categorizedMembers = useMemo(() => {
+    const categories = new Map<
+      string,
+      {
+        name: string;
+        strongestPower: bigint;
+        members: typeof rankedMembers;
+      }
+    >();
+
+    for (const member of rankedMembers) {
+      const existing = categories.get(member.category);
+      if (!existing) {
+        categories.set(member.category, {
+          name: member.category,
+          strongestPower: member.power,
+          members: [member]
+        });
+        continue;
+      }
+
+      existing.members.push(member);
+      if (member.power > existing.strongestPower) {
+        existing.strongestPower = member.power;
+      }
+    }
+
+    return Array.from(categories.values()).sort((left, right) => {
+      const byPower = compareBigIntDesc(left.strongestPower, right.strongestPower);
+      if (byPower !== 0) return byPower;
+      return left.name.localeCompare(right.name);
+    });
+  }, [rankedMembers]);
 
   const openServerWidget = (serverId: string) => {
     if (activeServerId === serverId) {
@@ -341,6 +469,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     });
   };
 
+  const removeMessageLocal = (messageId: string) => {
+    setMessages((previous) => previous.filter((entry) => entry.id !== messageId));
+    setThreadMessages((previous) => previous.filter((entry) => entry.id !== messageId));
+    setThreadParent((previous) => (previous?.id === messageId ? null : previous));
+  };
+
   const sendMessage = async (content: string, parentMessageId?: string) => {
     if (!activeChannelId) return;
 
@@ -375,10 +509,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (!activeChannelId) return;
 
     if (!socket?.connected) {
-      const deleted = await authRequest<Message>(`/channels/${activeChannelId}/messages/${messageId}`, {
+      const deleted = await authRequest<{ id: string }>(`/channels/${activeChannelId}/messages/${messageId}`, {
         method: 'DELETE'
       });
-      upsertMessageLocal(deleted);
+      removeMessageLocal(deleted.id);
       return;
     }
 
@@ -398,6 +532,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setError(null);
       setInviteCode('');
       setJoinModalOpen(false);
+      setServerModalTab('join');
       try {
         await refreshServers();
       } catch {
@@ -420,12 +555,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const leaveServer = async () => {
     if (!activeServer || !user || isLeavingServer) return;
 
-    if (activeServer.ownerId === user.id) {
-      setError('Transfer ownership before leaving this server.');
-      return;
-    }
+    const ownerExitWarning =
+      activeServer.ownerId === user.id
+        ? 'You are the owner. Leaving will transfer ownership to another member, or delete the server if you are alone.\n\n'
+        : '';
 
-    if (!window.confirm(`Leave "${activeServer.name}"?`)) {
+    if (!window.confirm(`${ownerExitWarning}Leave "${activeServer.name}"?`)) {
       return;
     }
 
@@ -449,20 +584,23 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     }
   };
 
-  const startDm = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!dmEmail.trim()) return;
+  const openServerModal = (tab: 'join' | 'create' = 'join') => {
+    setServerModalTab(tab);
+    setJoinModalOpen(true);
+  };
 
-    try {
-      const conversation = await authRequest<DirectConversation>('/dm/conversations', {
-        method: 'POST',
-        body: JSON.stringify({ email: dmEmail })
-      });
-      setDmEmail('');
-      router.push(`/dm/${conversation.id}`);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to start DM');
-    }
+  const handleServerCreated = (server: ConnzectServer) => {
+    setServers((previous) => {
+      if (previous.some((entry) => entry.id === server.id)) {
+        return previous;
+      }
+      return [server, ...previous];
+    });
+    setJoinModalOpen(false);
+    setServerModalTab('join');
+    setIsClosingServerView(false);
+    setActiveServerId(server.id);
+    setError(null);
   };
 
   const sidebarCollapsed = isTabletViewport && tabletSidebarCollapsed;
@@ -503,12 +641,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             <div className="ml-auto flex items-center gap-2">
               {user ? (
                 <>
-                  <Button variant="soft" className="hidden sm:inline-flex" onClick={() => setActionsOpen((current) => !current)}>
-                    {actionsOpen ? 'Hide Actions' : 'Workspace Actions'}
-                  </Button>
-                  <Button variant="soft" className="hidden sm:inline-flex" onClick={() => router.push('/dm')}>
-                    Direct Messages
-                  </Button>
                   <Button variant="soft" onClick={handleLogout}>
                     Logout
                   </Button>
@@ -541,14 +673,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
           )}
         >
-          <Sidebar
-            servers={servers}
-            activeServerId={activeServerId}
-            onOpenServer={openServerWidget}
-            onJoinServer={user ? () => setJoinModalOpen(true) : undefined}
-            onServerPicked={() => setMobileSidebarOpen(false)}
-            className="h-full"
-          />
+            <Sidebar
+              servers={servers}
+              activeServerId={activeServerId}
+              onOpenServer={openServerWidget}
+              onJoinServer={user ? () => openServerModal('join') : undefined}
+              onServerPicked={() => setMobileSidebarOpen(false)}
+              className="h-full"
+            />
         </div>
 
         <div className="mx-auto flex w-full max-w-[1600px] gap-6 px-4 pb-8 pt-6 md:px-8">
@@ -563,7 +695,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               activeServerId={activeServerId}
               collapsed={sidebarCollapsed}
               onOpenServer={openServerWidget}
-              onJoinServer={user ? () => setJoinModalOpen(true) : undefined}
+              onJoinServer={user ? () => openServerModal('join') : undefined}
               className="h-[calc(100vh-7.5rem)]"
             />
           </div>
@@ -590,12 +722,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     <Button
                       variant="danger"
                       onClick={leaveServer}
-                      disabled={isLeavingServer || activeServer.ownerId === user?.id}
-                      title={
-                        activeServer.ownerId === user?.id
-                          ? 'Server owners cannot leave their own server'
-                          : 'Leave server'
-                      }
+                      disabled={isLeavingServer}
+                      title="Leave server"
                     >
                       {isLeavingServer ? 'Leaving...' : 'Leave'}
                     </Button>
@@ -605,7 +733,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   </div>
                 </div>
 
-                <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+                <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_280px]">
                   <aside className="rounded-2xl border border-white/10 bg-black/15 p-3">
                     <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1">
                       {channels.map((channel) => (
@@ -663,6 +791,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               currentUserId={user?.id}
                               onEdit={editMessage}
                               onDelete={deleteMessage}
+                              allowDeleteOthers={activeServer.ownerId === user?.id}
                               onOpenThread={(message) => setThreadParent(message as Message)}
                               activeThreadParentId={threadParent?.id ?? null}
                             />
@@ -686,6 +815,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 currentUserId={user?.id}
                                 onEdit={editMessage}
                                 onDelete={deleteMessage}
+                                allowDeleteOthers={activeServer.ownerId === user?.id}
                               />
                               <MessageInput
                                 onSend={(content) => sendMessage(content, threadParent.id)}
@@ -702,6 +832,42 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                       </div>
                     )}
                   </section>
+
+                  <aside className="rounded-2xl border border-white/10 bg-black/15 p-3">
+                    <div className="soft-scroll max-h-[56vh] space-y-3 overflow-y-auto pr-1">
+                      {categorizedMembers.map((group) => (
+                        <section key={group.name} className="rounded-xl border border-white/10 bg-black/10 p-2.5">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-100/70">{group.name}</p>
+                            <span className="text-[10px] text-slate-400">{group.members.length}</span>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            {group.members.map((member) => (
+                              <div
+                                key={member.id}
+                                className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1.5 transition hover:border-white/15 hover:bg-white/5"
+                              >
+                                <div className="min-w-0 flex items-center gap-2">
+                                  <span className="w-6 text-[10px] text-slate-400">#{member.rank}</span>
+                                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-[10px] font-semibold tracking-[0.08em] text-slate-200">
+                                    {member.initials}
+                                  </span>
+                                  <span className="truncate text-sm text-slate-100">{member.displayName}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+
+                      {rankedMembers.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-white/20 p-4 text-xs text-slate-400">
+                          No players found for this server yet.
+                        </div>
+                      ) : null}
+                    </div>
+                  </aside>
                 </div>
               </section>
             ) : (
@@ -734,51 +900,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               </section>
             )}
 
-            {user && actionsOpen ? (
-              <section className={cn(styles.surface, styles.fadeIn, 'rounded-3xl border p-6')}>
-                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Workspace Actions</p>
-                <div className="mt-4 grid gap-4 xl:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                    <h3 className="text-base font-semibold text-white">Create Server</h3>
-                    <p className="mb-4 mt-1 text-xs text-slate-300">Provision instantly with icon upload.</p>
-                    <CreateServerForm onCreated={(server) => setServers((previous) => [server, ...previous])} />
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                    <h3 className="text-base font-semibold text-white">Join by Invite</h3>
-                    <p className="mb-4 mt-1 text-xs text-slate-300">Paste invite code or full invite link.</p>
-                    <form className="space-y-2" onSubmit={joinInvite}>
-                      <Input
-                        required
-                        placeholder="Invite code or link"
-                        value={inviteCode}
-                        onChange={(event) => setInviteCode(event.target.value)}
-                      />
-                      <Button variant="soft" className="w-full" disabled={isJoiningInvite}>
-                        {isJoiningInvite ? 'Joining...' : 'Join Server'}
-                      </Button>
-                    </form>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                    <h3 className="text-base font-semibold text-white">Start Direct Message</h3>
-                    <p className="mb-4 mt-1 text-xs text-slate-300">Open a DM thread by user email.</p>
-                    <form className="space-y-2" onSubmit={startDm}>
-                      <Input
-                        required
-                        type="email"
-                        placeholder="User email"
-                        value={dmEmail}
-                        onChange={(event) => setDmEmail(event.target.value)}
-                      />
-                      <Button variant="soft" className="w-full">
-                        Open DM
-                      </Button>
-                    </form>
-                  </div>
-                </div>
-              </section>
-            ) : null}
           </main>
         </div>
 
@@ -787,40 +908,84 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             <button
               type="button"
               className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-              onClick={() => setJoinModalOpen(false)}
+              onClick={() => {
+                setJoinModalOpen(false);
+                setServerModalTab('join');
+              }}
               aria-label="Close join modal"
             />
             <section className={cn(styles.surfaceStrong, styles.fadeIn, 'relative z-[71] w-full max-w-md rounded-3xl border p-5')}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Join Server</p>
-                  <h3 className="mt-2 text-xl font-semibold text-white">Invite link or code</h3>
+                  <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Server</p>
+                  <h3 className="mt-2 text-xl font-semibold text-white">
+                    {serverModalTab === 'join' ? 'Join server' : 'Create your server'}
+                  </h3>
                 </div>
                 <button
                   type="button"
                   className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/10"
-                  onClick={() => setJoinModalOpen(false)}
+                  onClick={() => {
+                    setJoinModalOpen(false);
+                    setServerModalTab('join');
+                  }}
                 >
                   Close
                 </button>
               </div>
 
-              <form className="mt-5 space-y-3" onSubmit={joinInvite}>
-                <Input
-                  required
-                  placeholder="https://... or invite code"
-                  value={inviteCode}
-                  onChange={(event) => setInviteCode(event.target.value)}
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <Button type="button" variant="soft" onClick={() => setJoinModalOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button variant="soft" disabled={isJoiningInvite}>
-                    {isJoiningInvite ? 'Joining...' : 'Join Server'}
-                  </Button>
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 p-1">
+                <button
+                  type="button"
+                  onClick={() => setServerModalTab('join')}
+                  className={cn(
+                    'flex-1 rounded-lg px-3 py-2 text-sm transition',
+                    serverModalTab === 'join' ? 'bg-emerald-200/15 text-emerald-50' : 'text-slate-300 hover:bg-white/5'
+                  )}
+                >
+                  Join
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerModalTab('create')}
+                  className={cn(
+                    'flex-1 rounded-lg px-3 py-2 text-sm transition',
+                    serverModalTab === 'create' ? 'bg-emerald-200/15 text-emerald-50' : 'text-slate-300 hover:bg-white/5'
+                  )}
+                >
+                  Create
+                </button>
+              </div>
+
+              {serverModalTab === 'join' ? (
+                <form className="mt-5 space-y-3" onSubmit={joinInvite}>
+                  <Input
+                    required
+                    placeholder="https://... or invite code"
+                    value={inviteCode}
+                    onChange={(event) => setInviteCode(event.target.value)}
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="soft"
+                      onClick={() => {
+                        setJoinModalOpen(false);
+                        setServerModalTab('join');
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button variant="soft" disabled={isJoiningInvite}>
+                      {isJoiningInvite ? 'Joining...' : 'Join Server'}
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <div className="mt-5">
+                  <CreateServerForm onCreated={handleServerCreated} />
                 </div>
-              </form>
+              )}
             </section>
           </div>
         ) : null}

@@ -87,6 +87,9 @@ export const listConversations = async (req: Request, res: Response): Promise<vo
             }
           },
           messages: {
+            where: {
+              deletedAt: null
+            },
             take: 1,
             orderBy: { createdAt: 'desc' },
             include: includeAuthor
@@ -197,6 +200,7 @@ export const getMessages = async (req: Request, res: Response): Promise<void> =>
     where: {
       conversationId,
       parentMessageId: parentMessageId ?? null,
+      deletedAt: null,
       ...(cursor ? { createdAt: { lt: cursor } } : {})
     },
     orderBy: { createdAt: 'desc' },
@@ -301,13 +305,11 @@ export const deleteMessage = async (req: Request, res: Response): Promise<void> 
     throw new HttpError(403, 'Cannot delete another user message');
   }
 
-  const deleted = await prisma.directMessage.update({
+  const deleted = await prisma.directMessage.delete({
     where: { id: message.id },
-    data: {
-      content: '[deleted]',
-      deletedAt: new Date()
-    },
-    include: includeAuthor
+    select: {
+      id: true
+    }
   });
 
   res.status(StatusCodes.OK).json(deleted);

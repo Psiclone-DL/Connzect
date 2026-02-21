@@ -110,12 +110,20 @@ export default function ChannelPage() {
       setThreadParent((prev) => (prev?.id === message.id ? message : prev));
     };
 
+    const onMessageDeleted = (payload: { id: string; channelId: string }) => {
+      if (payload.channelId !== channelId) return;
+      setMessages((prev) => prev.filter((entry) => entry.id !== payload.id));
+      setThreadMessages((prev) => prev.filter((entry) => entry.id !== payload.id));
+      setThreadParent((prev) => (prev?.id === payload.id ? null : prev));
+    };
+
     const onError = (payload: { scope: string; message: string }) => {
       setError(`${payload.scope}: ${payload.message}`);
     };
 
     socket.on('message:new', onMessage);
     socket.on('message:updated', onMessageUpdated);
+    socket.on('message:deleted', onMessageDeleted);
     socket.on('error:event', onError);
     socket.on('connect', joinChannel);
 
@@ -123,6 +131,7 @@ export default function ChannelPage() {
       socket.emit('channel:leave', { channelId });
       socket.off('message:new', onMessage);
       socket.off('message:updated', onMessageUpdated);
+      socket.off('message:deleted', onMessageDeleted);
       socket.off('error:event', onError);
       socket.off('connect', joinChannel);
     };
@@ -150,6 +159,12 @@ export default function ChannelPage() {
       }
       return [...prev, message];
     });
+  };
+
+  const removeMessageLocal = (messageId: string) => {
+    setMessages((prev) => prev.filter((entry) => entry.id !== messageId));
+    setThreadMessages((prev) => prev.filter((entry) => entry.id !== messageId));
+    setThreadParent((prev) => (prev?.id === messageId ? null : prev));
   };
 
   const sendMessage = async (content: string, parentMessageId?: string) => {
@@ -186,10 +201,10 @@ export default function ChannelPage() {
     if (!channelId) return;
 
     if (!socket?.connected) {
-      const deleted = await authRequest<Message>(`/channels/${channelId}/messages/${messageId}`, {
+      const deleted = await authRequest<{ id: string }>(`/channels/${channelId}/messages/${messageId}`, {
         method: 'DELETE'
       });
-      upsertMessageLocal(deleted);
+      removeMessageLocal(deleted.id);
       return;
     }
 
@@ -198,13 +213,13 @@ export default function ChannelPage() {
 
   return (
     <AuthGuard>
-      <main className="min-h-screen w-full px-2 py-4 md:px-4 md:py-5">
-        <div className="grid gap-3 lg:grid-cols-[5.5rem_17rem_minmax(0,1fr)]">
+      <main className="min-h-screen w-full overflow-x-clip px-2 py-4 md:px-4 md:py-5">
+        <div className="grid min-w-0 gap-3 lg:grid-cols-[5.5rem_17rem_minmax(0,1fr)]">
           <ServerSidebar servers={servers} activeServerId={serverId} />
 
           <ChannelList serverId={serverId} channels={channels} activeChannelId={channelId} />
 
-          <section className="space-y-4">
+          <section className="min-w-0 space-y-4">
             <Panel className="p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -243,6 +258,7 @@ export default function ChannelPage() {
                       currentUserId={user?.id}
                       onEdit={editMessage}
                       onDelete={deleteMessage}
+                      allowDeleteOthers={serverDetails?.ownerId === user?.id}
                       onOpenThread={(message) => setThreadParent(message as Message)}
                       activeThreadParentId={threadParent?.id ?? null}
                     />
@@ -266,6 +282,7 @@ export default function ChannelPage() {
                         currentUserId={user?.id}
                         onEdit={editMessage}
                         onDelete={deleteMessage}
+                        allowDeleteOthers={serverDetails?.ownerId === user?.id}
                       />
                       <MessageInput
                         onSend={(content) => sendMessage(content, threadParent.id)}

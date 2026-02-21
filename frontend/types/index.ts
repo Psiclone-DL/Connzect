@@ -88,6 +88,7 @@ export interface ServerDetails extends ConnzectServer {
     ServerMember & {
       memberRoles: Array<{
         roleId: string;
+        role: Role;
       }>;
     }
   >;
