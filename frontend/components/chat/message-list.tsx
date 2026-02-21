@@ -11,6 +11,10 @@ type GroupedChatMessage = {
   grouped: boolean;
   message: ChatMessage;
 };
+type MentionMatch = {
+  label: string;
+  type: 'user' | 'role';
+};
 
 const GROUP_WINDOW_MS = 30 * 60 * 1000;
 const compactTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -29,6 +33,7 @@ interface MessageListProps {
   allowDeleteOthers?: boolean;
   onOpenThread?: (message: ChatMessage) => void;
   activeThreadParentId?: string | null;
+  resolveMention?: (token: string) => MentionMatch | null;
 }
 
 export const MessageList = ({
@@ -38,7 +43,8 @@ export const MessageList = ({
   onDelete,
   allowDeleteOthers = false,
   onOpenThread,
-  activeThreadParentId
+  activeThreadParentId,
+  resolveMention
 }: MessageListProps) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState('');
@@ -79,6 +85,35 @@ export const MessageList = ({
     } finally {
       setBusy(false);
     }
+  };
+
+  const renderMessageContent = (content: string) => {
+    if (!resolveMention) return content;
+
+    const parts = content.split(/(@[A-Za-z0-9._-]+)/g);
+    return parts.map((part, index) => {
+      if (!part.startsWith('@')) {
+        return <span key={`text-${index}`}>{part}</span>;
+      }
+
+      const token = part.slice(1);
+      const mention = resolveMention(token);
+      if (!mention) {
+        return <span key={`text-${index}`}>{part}</span>;
+      }
+
+      return (
+        <span
+          key={`mention-${index}`}
+          className={cn(
+            'rounded px-1 py-0.5',
+            mention.type === 'role' ? 'bg-emerald-400/20 text-emerald-100' : 'bg-sky-400/20 text-sky-100'
+          )}
+        >
+          @{mention.label}
+        </span>
+      );
+    });
   };
 
   return (
@@ -185,7 +220,7 @@ export const MessageList = ({
                 </div>
               ) : (
                 <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.3] text-slate-100">
-                  {message.content}
+                  {renderMessageContent(message.content)}
                   {message.editedAt ? <span className="ml-2 text-[11px] text-slate-500">(edited)</span> : null}
                 </p>
               )}

@@ -27,6 +27,7 @@ export interface Role {
   id: string;
   name: string;
   color?: string | null;
+  mentionable: boolean;
   permissions: string;
   isDefault: boolean;
   position: number;

@@ -22,6 +22,7 @@ export const createRole = async (req: Request, res: Response): Promise<void> => 
       serverId,
       name: req.body.name,
       color: req.body.color ?? null,
+      mentionable: Boolean(req.body.mentionable),
       permissions: BigInt(req.body.permissions),
       position: (highestPosition?.position ?? 0) + 1
     }
@@ -55,6 +56,7 @@ export const updateRole = async (req: Request, res: Response): Promise<void> => 
     data: {
       name: req.body.name ?? role.name,
       color: req.body.color === undefined ? role.color : req.body.color,
+      mentionable: req.body.mentionable === undefined ? role.mentionable : Boolean(req.body.mentionable),
       permissions: req.body.permissions ? BigInt(req.body.permissions) : role.permissions
     }
   });

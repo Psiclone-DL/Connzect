@@ -138,6 +138,41 @@ export const getServer = async (req: Request, res: Response): Promise<void> => {
   });
 };
 
+export const updateServer = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) {
+    throw new HttpError(401, 'Unauthorized');
+  }
+
+  const serverId = routeParam(req.params.serverId);
+  await requireServerPermission(serverId, req.user.id, Permission.MANAGE_SERVER);
+
+  const existing = await prisma.server.findUnique({ where: { id: serverId } });
+  if (!existing) {
+    throw new HttpError(404, 'Server not found');
+  }
+
+  const nextName = typeof req.body.name === 'string' ? req.body.name.trim() : undefined;
+  if (nextName !== undefined && (nextName.length < 2 || nextName.length > 80)) {
+    throw new HttpError(400, 'Server name must be between 2 and 80 characters');
+  }
+
+  const nextIconUrl = req.file ? `/uploads/${req.file.filename}` : undefined;
+
+  if (!nextName && !nextIconUrl) {
+    throw new HttpError(400, 'No server settings changes were provided');
+  }
+
+  const updated = await prisma.server.update({
+    where: { id: serverId },
+    data: {
+      name: nextName ?? existing.name,
+      iconUrl: nextIconUrl ?? existing.iconUrl
+    }
+  });
+
+  res.status(StatusCodes.OK).json(updated);
+};
+
 export const addMemberByEmail = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
     throw new HttpError(401, 'Unauthorized');

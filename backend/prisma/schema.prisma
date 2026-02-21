@@ -76,6 +76,7 @@ model Role {
   serverId           String
   name               String
   color              String?
+  mentionable        Boolean                 @default(false)
   position           Int                     @default(0)
   permissions        BigInt                  @default(0)
   isDefault          Boolean                 @default(false)

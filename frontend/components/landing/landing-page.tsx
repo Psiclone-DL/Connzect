@@ -4,7 +4,7 @@ import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useStat
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { CreateServerForm } from '@/components/forms/create-server-form';
-import { MessageInput } from '@/components/chat/message-input';
+import { MessageInput, type MentionSuggestion } from '@/components/chat/message-input';
 import { MessageList } from '@/components/chat/message-list';
 import { VoiceRoom } from '@/components/voice/voice-room';
 import { Button } from '@/components/ui/button';
@@ -74,6 +74,61 @@ const compareBigIntDesc = (left: bigint, right: bigint): number => {
   return left > right ? -1 : 1;
 };
 
+const ROLE_PERMISSION_FLAGS = {
+  kickMember: 1n << 8n,
+  banMember: 1n << 7n,
+  muteChat: 1n << 1n,
+  muteVoice: 1n << 2n
+} as const;
+
+const ROLE_PERMISSION_OPTIONS: Array<{ key: keyof RolePermissionDraft; label: string }> = [
+  { key: 'kickMember', label: 'Kick' },
+  { key: 'banMember', label: 'Ban' },
+  { key: 'muteChat', label: 'Mute chat' },
+  { key: 'muteVoice', label: 'Mute voice' }
+];
+
+type RolePermissionDraft = {
+  kickMember: boolean;
+  banMember: boolean;
+  muteChat: boolean;
+  muteVoice: boolean;
+};
+
+type EditableRoleDraft = {
+  name: string;
+  mentionable: boolean;
+  permissions: RolePermissionDraft;
+};
+
+const hasPermissionFlag = (value: bigint, flag: bigint): boolean => (value & flag) === flag;
+
+const toRolePermissionDraft = (permissions?: string): RolePermissionDraft => {
+  const bits = parsePermissionValue(permissions);
+  return {
+    kickMember: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.kickMember),
+    banMember: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.banMember),
+    muteChat: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.muteChat),
+    muteVoice: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.muteVoice)
+  };
+};
+
+const toPermissionBits = (draft: RolePermissionDraft): string => {
+  let bits = 0n;
+  if (draft.kickMember) bits |= ROLE_PERMISSION_FLAGS.kickMember;
+  if (draft.banMember) bits |= ROLE_PERMISSION_FLAGS.banMember;
+  if (draft.muteChat) bits |= ROLE_PERMISSION_FLAGS.muteChat;
+  if (draft.muteVoice) bits |= ROLE_PERMISSION_FLAGS.muteVoice;
+  return bits.toString();
+};
+
+const toMentionKey = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9._-]/g, '');
+
 type RankedMemberEntry = {
   id: string;
   userId: string;
@@ -127,6 +182,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [serverMembers, setServerMembers] = useState<ServerDetails['members']>([]);
+  const [serverRoles, setServerRoles] = useState<Role[]>([]);
   const [activeChannelId, setActiveChannelId] = useState('');
   const [activeTextChannelId, setActiveTextChannelId] = useState('');
   const [connectedVoiceChannelId, setConnectedVoiceChannelId] = useState('');
@@ -138,6 +194,22 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [channelProperties, setChannelProperties] = useState<Channel | null>(null);
   const [memberAudioSettings, setMemberAudioSettings] = useState<Record<string, { volume: number; muted: boolean }>>({});
+  const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
+  const [serverSettingsTab, setServerSettingsTab] = useState<'general' | 'permissions'>('general');
+  const [serverSettingsName, setServerSettingsName] = useState('');
+  const [serverSettingsIconFile, setServerSettingsIconFile] = useState<File | null>(null);
+  const [isSavingServerSettings, setIsSavingServerSettings] = useState(false);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRoleMentionable, setNewRoleMentionable] = useState(true);
+  const [newRolePermissions, setNewRolePermissions] = useState<RolePermissionDraft>({
+    kickMember: false,
+    banMember: false,
+    muteChat: false,
+    muteVoice: false
+  });
+  const [isCreatingRole, setIsCreatingRole] = useState(false);
+  const [roleDrafts, setRoleDrafts] = useState<Record<string, EditableRoleDraft>>({});
+  const [roleBusyState, setRoleBusyState] = useState<Record<string, boolean>>({});
 
   const [inviteCode, setInviteCode] = useState('');
   const closeTimerRef = useRef<number | null>(null);
@@ -250,10 +322,30 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   }, [joinModalOpen]);
 
   useEffect(() => {
+    if (!serverSettingsOpen) return;
+
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setServerSettingsOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [serverSettingsOpen]);
+
+  useEffect(() => {
     if (!activeServerId) return;
     if (!servers.some((server) => server.id === activeServerId)) {
       setActiveServerId(null);
     }
+  }, [activeServerId, servers]);
+
+  useEffect(() => {
+    if (!activeServerId) return;
+    const selected = servers.find((server) => server.id === activeServerId);
+    if (!selected) return;
+    setServerSettingsName(selected.name);
   }, [activeServerId, servers]);
 
   useEffect(
@@ -303,11 +395,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (!activeServerId) {
       setChannels([]);
       setServerMembers([]);
+      setServerRoles([]);
       setActiveChannelId('');
       setActiveTextChannelId('');
       setMessages([]);
       setThreadParent(null);
       setThreadMessages([]);
+      setServerSettingsOpen(false);
       return;
     }
 
@@ -321,12 +415,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         if (cancelled) return;
         setChannels(loadedChannels);
         setServerMembers(serverDetails.members);
+        setServerRoles(serverDetails.roles);
       })
       .catch((nextError) => {
         if (cancelled) return;
         setError(nextError instanceof Error ? nextError.message : 'Failed loading channels');
         setChannels([]);
         setServerMembers([]);
+        setServerRoles([]);
       });
 
     return () => {
@@ -458,6 +554,96 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     () => (activeServerId ? servers.find((server) => server.id === activeServerId) ?? null : null),
     [activeServerId, servers]
   );
+  const sortedServerRoles = useMemo(() => [...serverRoles].sort((left, right) => right.position - left.position), [serverRoles]);
+  const currentMember = useMemo(
+    () => (user ? serverMembers.find((member) => member.userId === user.id) ?? null : null),
+    [serverMembers, user]
+  );
+  const currentMemberPermissions = useMemo(() => {
+    if (!currentMember) return 0n;
+    return currentMember.memberRoles.reduce((acc, entry) => acc | parsePermissionValue(entry.role.permissions), 0n);
+  }, [currentMember]);
+  const canOpenServerSettings = useMemo(() => {
+    if (!activeServer || !user) return false;
+    if (activeServer.ownerId === user.id) return true;
+    return hasPermissionFlag(currentMemberPermissions, 1n << 9n);
+  }, [activeServer, currentMemberPermissions, user]);
+
+  useEffect(() => {
+    if (!activeServer) {
+      setServerSettingsName('');
+      setServerSettingsIconFile(null);
+      return;
+    }
+
+    setServerSettingsName(activeServer.name);
+    setServerSettingsIconFile(null);
+  }, [activeServer]);
+
+  useEffect(() => {
+    const nextDrafts: Record<string, EditableRoleDraft> = {};
+    for (const role of serverRoles) {
+      nextDrafts[role.id] = {
+        name: role.name,
+        mentionable: role.mentionable,
+        permissions: toRolePermissionDraft(role.permissions)
+      };
+    }
+    setRoleDrafts(nextDrafts);
+  }, [serverRoles]);
+
+  const mentionSuggestions = useMemo<MentionSuggestion[]>(() => {
+    const dedup = new Map<string, MentionSuggestion>();
+
+    for (const member of serverMembers) {
+      const nameLabel = member.nickname?.trim() || member.user.displayName;
+      const normalizedName = toMentionKey(nameLabel);
+      if (normalizedName && !dedup.has(normalizedName)) {
+        dedup.set(normalizedName, {
+          id: `user-name-${member.userId}`,
+          label: nameLabel,
+          insertText: normalizedName,
+          type: 'user',
+          secondaryLabel: 'name'
+        });
+      }
+      const userIdKey = member.userId.toLowerCase();
+      if (!dedup.has(userIdKey)) {
+        dedup.set(userIdKey, {
+          id: `user-id-${member.userId}`,
+          label: nameLabel,
+          insertText: member.userId,
+          type: 'user',
+          secondaryLabel: 'id'
+        });
+      }
+    }
+
+    for (const role of sortedServerRoles) {
+      if (!role.mentionable) continue;
+      const normalizedRole = toMentionKey(role.name);
+      if (!normalizedRole || dedup.has(normalizedRole)) continue;
+      dedup.set(normalizedRole, {
+        id: `role-${role.id}`,
+        label: role.name,
+        insertText: normalizedRole,
+        type: 'role'
+      });
+    }
+
+    return Array.from(dedup.values());
+  }, [serverMembers, sortedServerRoles]);
+
+  const mentionResolver = useMemo(() => {
+    const lookup = new Map<string, { label: string; type: 'user' | 'role' }>();
+    for (const suggestion of mentionSuggestions) {
+      lookup.set(suggestion.insertText.toLowerCase(), {
+        label: suggestion.label,
+        type: suggestion.type
+      });
+    }
+    return (token: string) => lookup.get(token.toLowerCase()) ?? null;
+  }, [mentionSuggestions]);
 
   const rankedMembers = useMemo<RankedMemberEntry[]>(() => {
     if (!activeServer || serverMembers.length === 0) return [];
@@ -800,6 +986,157 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     socket.emit('message:delete', { channelId: activeChatChannelId, messageId });
   };
 
+  const refreshActiveServerDetails = useCallback(
+    async (serverId: string) => {
+      const details = await authRequest<ServerDetails>(`/servers/${serverId}`);
+      setServerMembers(details.members);
+      setServerRoles(details.roles);
+    },
+    [authRequest]
+  );
+
+  const saveServerSettings = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!activeServer || isSavingServerSettings) return;
+
+    const trimmedName = serverSettingsName.trim();
+    const hasNameChange = trimmedName.length > 0 && trimmedName !== activeServer.name;
+    const hasIconChange = Boolean(serverSettingsIconFile);
+
+    if (!hasNameChange && !hasIconChange) {
+      setError('No server changes to save.');
+      return;
+    }
+
+    if (hasNameChange && (trimmedName.length < 2 || trimmedName.length > 80)) {
+      setError('Server name must be between 2 and 80 characters.');
+      return;
+    }
+
+    const payload = new FormData();
+    if (hasNameChange) payload.append('name', trimmedName);
+    if (serverSettingsIconFile) payload.append('icon', serverSettingsIconFile);
+
+    setIsSavingServerSettings(true);
+    try {
+      const updated = await authRequest<ConnzectServer>(`/servers/${activeServer.id}`, {
+        method: 'PATCH',
+        body: payload
+      });
+      setServers((previous) => previous.map((server) => (server.id === updated.id ? { ...server, ...updated } : server)));
+      setServerSettingsName(updated.name);
+      setServerSettingsIconFile(null);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to update server settings');
+    } finally {
+      setIsSavingServerSettings(false);
+    }
+  };
+
+  const updateRoleDraft = (roleId: string, updater: (draft: EditableRoleDraft) => EditableRoleDraft) => {
+    setRoleDrafts((previous) => {
+      const existing = previous[roleId];
+      if (!existing) return previous;
+      return {
+        ...previous,
+        [roleId]: updater(existing)
+      };
+    });
+  };
+
+  const setRoleBusy = (roleId: string, busy: boolean) => {
+    setRoleBusyState((previous) => ({
+      ...previous,
+      [roleId]: busy
+    }));
+  };
+
+  const createRole = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!activeServer || isCreatingRole) return;
+
+    const trimmedName = newRoleName.trim();
+    if (trimmedName.length < 2 || trimmedName.length > 32) {
+      setError('Role name must be between 2 and 32 characters.');
+      return;
+    }
+
+    setIsCreatingRole(true);
+    try {
+      await authRequest<Role>(`/servers/${activeServer.id}/roles`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: trimmedName,
+          mentionable: newRoleMentionable,
+          permissions: toPermissionBits(newRolePermissions)
+        })
+      });
+      await refreshActiveServerDetails(activeServer.id);
+      setNewRoleName('');
+      setNewRoleMentionable(true);
+      setNewRolePermissions({
+        kickMember: false,
+        banMember: false,
+        muteChat: false,
+        muteVoice: false
+      });
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to create role');
+    } finally {
+      setIsCreatingRole(false);
+    }
+  };
+
+  const saveRole = async (roleId: string) => {
+    if (!activeServer) return;
+    const draft = roleDrafts[roleId];
+    if (!draft) return;
+
+    const trimmedName = draft.name.trim();
+    if (trimmedName.length < 2 || trimmedName.length > 32) {
+      setError('Role name must be between 2 and 32 characters.');
+      return;
+    }
+
+    setRoleBusy(roleId, true);
+    try {
+      await authRequest<Role>(`/servers/${activeServer.id}/roles/${roleId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: trimmedName,
+          mentionable: draft.mentionable,
+          permissions: toPermissionBits(draft.permissions)
+        })
+      });
+      await refreshActiveServerDetails(activeServer.id);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to update role');
+    } finally {
+      setRoleBusy(roleId, false);
+    }
+  };
+
+  const deleteRole = async (role: Role) => {
+    if (!activeServer || role.isDefault || roleBusyState[role.id]) return;
+    if (!window.confirm(`Delete role "${role.name}"?`)) return;
+
+    setRoleBusy(role.id, true);
+    try {
+      await authRequest(`/servers/${activeServer.id}/roles/${role.id}`, {
+        method: 'DELETE'
+      });
+      await refreshActiveServerDetails(activeServer.id);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to delete role');
+    } finally {
+      setRoleBusy(role.id, false);
+    }
+  };
+
   const joinInvite = async (event: FormEvent) => {
     event.preventDefault();
     const code = parseInviteCode(inviteCode);
@@ -1119,6 +1456,17 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     <h2 className="mt-2 text-2xl font-semibold text-white">{activeServer.name}</h2>
                   </div>
                   <div className="flex items-center gap-2">
+                    {canOpenServerSettings ? (
+                      <Button
+                        variant="soft"
+                        onClick={() => {
+                          setServerSettingsTab('general');
+                          setServerSettingsOpen(true);
+                        }}
+                      >
+                        Server Settings
+                      </Button>
+                    ) : null}
                     <Button
                       variant="danger"
                       onClick={leaveServer}
@@ -1232,8 +1580,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               allowDeleteOthers={activeServer.ownerId === user?.id}
                               onOpenThread={(message) => setThreadParent(message as Message)}
                               activeThreadParentId={threadParent?.id ?? null}
+                              resolveMention={mentionResolver}
                             />
-                            <MessageInput onSend={(content) => sendMessage(content)} placeholder="Type in channel" />
+                            <MessageInput
+                              onSend={(content) => sendMessage(content)}
+                              placeholder="Type in channel"
+                              mentionSuggestions={mentionSuggestions}
+                            />
                           </div>
 
                           {threadParent ? (
@@ -1254,11 +1607,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 onEdit={editMessage}
                                 onDelete={deleteMessage}
                                 allowDeleteOthers={activeServer.ownerId === user?.id}
+                                resolveMention={mentionResolver}
                               />
                               <MessageInput
                                 onSend={(content) => sendMessage(content, threadParent.id)}
                                 placeholder="Reply in thread"
                                 submitLabel="Reply"
+                                mentionSuggestions={mentionSuggestions}
                               />
                             </div>
                           ) : null}
@@ -1501,6 +1856,250 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   Close
                 </Button>
               </div>
+            </section>
+          </div>
+        ) : null}
+
+        {user && activeServer && serverSettingsOpen ? (
+          <div className="fixed inset-0 z-[74] flex items-center justify-center p-4">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setServerSettingsOpen(false)}
+              aria-label="Close server settings"
+            />
+            <section className={cn(styles.surfaceStrong, styles.fadeIn, 'relative z-[75] w-full max-w-3xl rounded-3xl border p-5')}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Server Settings</p>
+                  <h3 className="mt-2 text-xl font-semibold text-white">{activeServer.name}</h3>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/10"
+                  onClick={() => setServerSettingsOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 p-1">
+                <button
+                  type="button"
+                  onClick={() => setServerSettingsTab('general')}
+                  className={cn(
+                    'flex-1 rounded-lg px-3 py-2 text-sm transition',
+                    serverSettingsTab === 'general' ? 'bg-emerald-200/15 text-emerald-50' : 'text-slate-300 hover:bg-white/5'
+                  )}
+                >
+                  General
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerSettingsTab('permissions')}
+                  className={cn(
+                    'flex-1 rounded-lg px-3 py-2 text-sm transition',
+                    serverSettingsTab === 'permissions' ? 'bg-emerald-200/15 text-emerald-50' : 'text-slate-300 hover:bg-white/5'
+                  )}
+                >
+                  Permissions
+                </button>
+              </div>
+
+              {serverSettingsTab === 'general' ? (
+                <form className="mt-5 space-y-4" onSubmit={saveServerSettings}>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">Server icon</p>
+                    <div className="mt-3 flex items-center gap-3">
+                      {resolveAssetUrl(activeServer.iconUrl ?? null) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={resolveAssetUrl(activeServer.iconUrl ?? null) ?? ''}
+                          alt={`${activeServer.name} icon`}
+                          className="h-14 w-14 rounded-xl border border-white/20 object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-lg font-semibold text-slate-100">
+                          {activeServer.name.trim().charAt(0).toUpperCase() || 'S'}
+                        </div>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(event) => setServerSettingsIconFile(event.target.files?.[0] ?? null)}
+                        className="block w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border file:border-white/15 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:text-slate-100 hover:file:bg-white/15"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">Server name</p>
+                    <Input
+                      value={serverSettingsName}
+                      onChange={(event) => setServerSettingsName(event.target.value)}
+                      maxLength={80}
+                      className="mt-3"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <Button type="button" variant="soft" onClick={() => setServerSettingsOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button variant="soft" disabled={isSavingServerSettings}>
+                      {isSavingServerSettings ? 'Saving...' : 'Save Changes'}
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <div className="mt-5 space-y-4">
+                  <form className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4" onSubmit={createRole}>
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">Create custom rank</p>
+                    <Input
+                      value={newRoleName}
+                      onChange={(event) => setNewRoleName(event.target.value)}
+                      placeholder="Rank name"
+                      maxLength={32}
+                    />
+                    <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={newRoleMentionable}
+                        onChange={(event) => setNewRoleMentionable(event.target.checked)}
+                        className="h-3.5 w-3.5 accent-emerald-300"
+                      />
+                      Mentionable rank (@Rank)
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {ROLE_PERMISSION_OPTIONS.map((option) => (
+                        <label
+                          key={`new-role-${option.key}`}
+                          className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-slate-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={newRolePermissions[option.key]}
+                            onChange={(event) =>
+                              setNewRolePermissions((previous) => ({
+                                ...previous,
+                                [option.key]: event.target.checked
+                              }))
+                            }
+                            className="h-3.5 w-3.5 accent-emerald-300"
+                          />
+                          {option.label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex justify-end">
+                      <Button variant="soft" disabled={isCreatingRole}>
+                        {isCreatingRole ? 'Creating...' : 'Create Rank'}
+                      </Button>
+                    </div>
+                  </form>
+
+                  <div className="soft-scroll max-h-[45vh] space-y-3 overflow-y-auto pr-1">
+                    {sortedServerRoles.map((role) => {
+                      const draft = roleDrafts[role.id] ?? {
+                        name: role.name,
+                        mentionable: role.mentionable,
+                        permissions: toRolePermissionDraft(role.permissions)
+                      };
+                      const isBusy = Boolean(roleBusyState[role.id]);
+                      const isDefaultRole = role.isDefault;
+
+                      return (
+                        <article key={role.id} className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-slate-100">{role.name}</p>
+                            {isDefaultRole ? (
+                              <span className="rounded-md border border-amber-200/30 bg-amber-300/15 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-amber-100">
+                                Default
+                              </span>
+                            ) : null}
+                          </div>
+
+                          <Input
+                            value={draft.name}
+                            disabled={isDefaultRole || isBusy}
+                            onChange={(event) =>
+                              updateRoleDraft(role.id, (previous) => ({
+                                ...previous,
+                                name: event.target.value
+                              }))
+                            }
+                            maxLength={32}
+                          />
+
+                          <label className="inline-flex items-center gap-2 text-xs text-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={draft.mentionable}
+                              disabled={isDefaultRole || isBusy}
+                              onChange={(event) =>
+                                updateRoleDraft(role.id, (previous) => ({
+                                  ...previous,
+                                  mentionable: event.target.checked
+                                }))
+                              }
+                              className="h-3.5 w-3.5 accent-emerald-300"
+                            />
+                            Mentionable rank (@Rank)
+                          </label>
+
+                          <div className="flex flex-wrap gap-2">
+                            {ROLE_PERMISSION_OPTIONS.map((option) => (
+                              <label
+                                key={`${role.id}-${option.key}`}
+                                className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-slate-200"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={draft.permissions[option.key]}
+                                  disabled={isDefaultRole || isBusy}
+                                  onChange={(event) =>
+                                    updateRoleDraft(role.id, (previous) => ({
+                                      ...previous,
+                                      permissions: {
+                                        ...previous.permissions,
+                                        [option.key]: event.target.checked
+                                      }
+                                    }))
+                                  }
+                                  className="h-3.5 w-3.5 accent-emerald-300"
+                                />
+                                {option.label}
+                              </label>
+                            ))}
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="soft"
+                              disabled={isDefaultRole || isBusy}
+                              onClick={() => saveRole(role.id)}
+                            >
+                              {isBusy ? 'Saving...' : 'Save'}
+                            </Button>
+                            {!isDefaultRole ? (
+                              <Button type="button" variant="danger" disabled={isBusy} onClick={() => deleteRole(role)}>
+                                Delete
+                              </Button>
+                            ) : null}
+                          </div>
+                        </article>
+                      );
+                    })}
+
+                    {sortedServerRoles.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-white/20 p-4 text-xs text-slate-400">
+                        No roles found for this server.
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              )}
             </section>
           </div>
         ) : null}
