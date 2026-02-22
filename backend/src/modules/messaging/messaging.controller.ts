@@ -16,10 +16,35 @@ const includeAuthor = {
   }
 } as const;
 
-const assertTextChannel = (channelType: 'TEXT' | 'VOICE'): void => {
+const assertTextChannel = (channelType: 'TEXT' | 'VOICE' | 'CATEGORY'): void => {
   if (channelType !== 'TEXT') {
-    throw new HttpError(400, 'Voice channels do not support text chat');
+    throw new HttpError(400, 'Only text channels support text chat');
   }
+};
+
+const assertSlowMode = async (channelId: string, authorId: string, slowModeSeconds: number): Promise<void> => {
+  if (slowModeSeconds <= 0) return;
+
+  const latestOwnMessage = await prisma.message.findFirst({
+    where: {
+      channelId,
+      authorId
+    },
+    orderBy: {
+      createdAt: 'desc'
+    },
+    select: {
+      createdAt: true
+    }
+  });
+
+  if (!latestOwnMessage) return;
+
+  const elapsedSeconds = Math.floor((Date.now() - latestOwnMessage.createdAt.getTime()) / 1000);
+  if (elapsedSeconds >= slowModeSeconds) return;
+
+  const remaining = Math.max(1, slowModeSeconds - elapsedSeconds);
+  throw new HttpError(429, `Slow mode is enabled. Wait ${remaining}s before sending another message.`);
 };
 
 const ensureChannelAccess = async (channelId: string, userId: string) => {
@@ -93,6 +118,10 @@ export const createMessage = async (req: Request, res: Response): Promise<void> 
 
   if (!hasPermission(effective, Permission.SEND_MESSAGE)) {
     throw new HttpError(403, 'Missing SEND_MESSAGE permission');
+  }
+
+  if (!hasPermission(effective, Permission.MANAGE_SERVER)) {
+    await assertSlowMode(channelId, req.user.id, channel.slowModeSeconds);
   }
 
   if (parentMessageId) {

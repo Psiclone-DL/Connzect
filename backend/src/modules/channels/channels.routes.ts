@@ -13,7 +13,7 @@ const router = Router();
 router.use(requireAuth);
 router.get('/:serverId/channels', controller.listVisibleChannels);
 router.post('/:serverId/channels', validate(createChannelSchema), controller.createChannel);
-router.patch('/:serverId/channels/:channelId', validate(updateChannelSchema), controller.renameChannel);
+router.patch('/:serverId/channels/:channelId', validate(updateChannelSchema), controller.updateChannel);
 router.delete('/:serverId/channels/:channelId', controller.deleteChannel);
 router.patch(
   '/:serverId/channels/:channelId/permissions/:roleId',

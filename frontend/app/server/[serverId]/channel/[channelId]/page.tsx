@@ -63,7 +63,7 @@ export default function ChannelPage() {
   }, [authRequest, serverId]);
 
   useEffect(() => {
-    if (!channelId || !activeChannel || activeChannel.type === 'VOICE') {
+    if (!channelId || !activeChannel || activeChannel.type !== 'TEXT') {
       setMessages([]);
       setThreadParent(null);
       setThreadMessages([]);
@@ -80,7 +80,7 @@ export default function ChannelPage() {
   }, [activeChannel, authRequest, channelId]);
 
   useEffect(() => {
-    if (!threadParent || !channelId || !activeChannel || activeChannel.type === 'VOICE') return;
+    if (!threadParent || !channelId || !activeChannel || activeChannel.type !== 'TEXT') return;
 
     authRequest<Message[]>(`/channels/${channelId}/messages?limit=50&parentMessageId=${threadParent.id}`)
       .then(setThreadMessages)
@@ -88,7 +88,7 @@ export default function ChannelPage() {
   }, [activeChannel, authRequest, channelId, threadParent]);
 
   useEffect(() => {
-    if (!socket || !channelId || !activeChannel || activeChannel.type === 'VOICE') return;
+    if (!socket || !channelId || !activeChannel || activeChannel.type !== 'TEXT') return;
 
     const joinChannel = () => {
       socket.emit('channel:join', { channelId });
@@ -173,8 +173,8 @@ export default function ChannelPage() {
 
   const sendMessage = async (content: string, parentMessageId?: string) => {
     if (!channelId) return;
-    if (!activeChannel || activeChannel.type === 'VOICE') {
-      setError('Voice channels do not support text chat');
+    if (!activeChannel || activeChannel.type !== 'TEXT') {
+      setError('Only text channels support text chat');
       return;
     }
 
@@ -192,8 +192,8 @@ export default function ChannelPage() {
 
   const editMessage = async (messageId: string, content: string) => {
     if (!channelId) return;
-    if (!activeChannel || activeChannel.type === 'VOICE') {
-      setError('Voice channels do not support text chat');
+    if (!activeChannel || activeChannel.type !== 'TEXT') {
+      setError('Only text channels support text chat');
       return;
     }
 
@@ -211,8 +211,8 @@ export default function ChannelPage() {
 
   const deleteMessage = async (messageId: string) => {
     if (!channelId) return;
-    if (!activeChannel || activeChannel.type === 'VOICE') {
-      setError('Voice channels do not support text chat');
+    if (!activeChannel || activeChannel.type !== 'TEXT') {
+      setError('Only text channels support text chat');
       return;
     }
 
@@ -272,6 +272,10 @@ export default function ChannelPage() {
                     Voice channel selected. Realtime connection is required to join voice.
                   </div>
                 )
+              ) : activeChannel?.type === 'CATEGORY' ? (
+                <div className="rounded-2xl border border-dashed border-white/20 p-6 text-sm text-slate-300">
+                  Category selected. Pick a text or voice channel.
+                </div>
               ) : (
                 <div className={`grid gap-4 ${threadParent ? 'lg:grid-cols-[1.6fr_1fr]' : ''}`}>
                   <div>

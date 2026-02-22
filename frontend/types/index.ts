@@ -13,13 +13,19 @@ export interface ConnzectServer {
   createdAt: string;
 }
 
-export type ChannelType = 'TEXT' | 'VOICE';
+export type ChannelType = 'CATEGORY' | 'TEXT' | 'VOICE';
+export type VideoQuality = 'AUTO' | 'HD' | 'FULL_HD';
 
 export interface Channel {
   id: string;
   serverId: string;
+  categoryId?: string | null;
   name: string;
   type: ChannelType;
+  slowModeSeconds: number;
+  bitrate?: number | null;
+  videoQuality?: VideoQuality | null;
+  userLimit?: number | null;
   position: number;
 }
 

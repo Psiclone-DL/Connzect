@@ -17,7 +17,10 @@ export default function ServerEntryPage() {
 
     authRequest<ServerDetails>(`/servers/${params.serverId}`)
       .then((details) => {
-        const firstChannel = details.channels[0];
+        const firstChannel =
+          details.channels.find((channel) => channel.type === 'TEXT') ??
+          details.channels.find((channel) => channel.type === 'VOICE') ??
+          details.channels[0];
         if (mounted && firstChannel) {
           router.replace(`/server/${params.serverId}/channel/${firstChannel.id}`);
         }

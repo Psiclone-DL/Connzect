@@ -13,7 +13,16 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { resolveAssetUrl } from '@/lib/assets';
 import { useSocket } from '@/hooks/use-socket';
-import type { Channel, ConnzectServer, DirectConversation, Message, Role, ServerDetails, VoiceParticipant } from '@/types';
+import type {
+  Channel,
+  ConnzectServer,
+  DirectConversation,
+  Message,
+  Role,
+  ServerDetails,
+  VideoQuality,
+  VoiceParticipant
+} from '@/types';
 import { Sidebar } from './sidebar';
 import styles from './landing-page.module.css';
 
@@ -81,11 +90,22 @@ const ROLE_PERMISSION_FLAGS = {
   muteVoice: 1n << 2n
 } as const;
 
+const SERVER_PERMISSION_FLAGS = {
+  createChannel: 1n << 3n,
+  manageServer: 1n << 9n
+} as const;
+
 const ROLE_PERMISSION_OPTIONS: Array<{ key: keyof RolePermissionDraft; label: string }> = [
   { key: 'kickMember', label: 'Kick' },
   { key: 'banMember', label: 'Ban' },
   { key: 'muteChat', label: 'Mute chat' },
   { key: 'muteVoice', label: 'Mute voice' }
+];
+
+const VOICE_VIDEO_QUALITY_OPTIONS: Array<{ value: VideoQuality; label: string }> = [
+  { value: 'AUTO', label: 'Auto' },
+  { value: 'HD', label: 'HD (720p)' },
+  { value: 'FULL_HD', label: 'Full HD (1080p)' }
 ];
 
 type RolePermissionDraft = {
@@ -156,7 +176,24 @@ type ContextMenuState =
       y: number;
       member: RankedMemberEntry;
     }
+  | {
+      type: 'channelList';
+      x: number;
+      y: number;
+    }
   | null;
+
+type ChannelEditorState = {
+  mode: 'create' | 'edit';
+  channelId?: string;
+  type: 'CATEGORY' | 'TEXT' | 'VOICE';
+  name: string;
+  categoryId: string | null;
+  slowModeSeconds: number;
+  bitrate: number;
+  videoQuality: VideoQuality;
+  userLimit: number;
+};
 
 export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const router = useRouter();
@@ -194,6 +231,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [channelProperties, setChannelProperties] = useState<Channel | null>(null);
   const [memberAudioSettings, setMemberAudioSettings] = useState<Record<string, { volume: number; muted: boolean }>>({});
+  const [channelEditor, setChannelEditor] = useState<ChannelEditorState | null>(null);
+  const [isSavingChannelEditor, setIsSavingChannelEditor] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [serverSettingsTab, setServerSettingsTab] = useState<'general' | 'permissions'>('general');
   const [serverSettingsName, setServerSettingsName] = useState('');
@@ -220,7 +259,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     [activeChannelId, channels]
   );
   const activeChatChannelId = useMemo(
-    () => (activeChannel?.type === 'VOICE' ? activeTextChannelId : activeChannel?.id ?? ''),
+    () => (activeChannel?.type === 'TEXT' ? activeChannel.id : activeTextChannelId),
     [activeChannel?.id, activeChannel?.type, activeTextChannelId]
   );
   const activeChatChannel = useMemo(
@@ -333,6 +372,19 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
   }, [serverSettingsOpen]);
+
+  useEffect(() => {
+    if (!channelEditor) return;
+
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setChannelEditor(null);
+      }
+    };
+
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [channelEditor]);
 
   useEffect(() => {
     if (!activeServerId) return;
@@ -563,11 +615,53 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (!currentMember) return 0n;
     return currentMember.memberRoles.reduce((acc, entry) => acc | parsePermissionValue(entry.role.permissions), 0n);
   }, [currentMember]);
+  const canCreateChannels = useMemo(() => {
+    if (!activeServer || !user) return false;
+    if (activeServer.ownerId === user.id) return true;
+    return hasPermissionFlag(currentMemberPermissions, SERVER_PERMISSION_FLAGS.createChannel);
+  }, [activeServer, currentMemberPermissions, user]);
+  const canManageChannels = useMemo(() => {
+    if (!activeServer || !user) return false;
+    if (activeServer.ownerId === user.id) return true;
+    return hasPermissionFlag(currentMemberPermissions, SERVER_PERMISSION_FLAGS.manageServer);
+  }, [activeServer, currentMemberPermissions, user]);
   const canOpenServerSettings = useMemo(() => {
     if (!activeServer || !user) return false;
     if (activeServer.ownerId === user.id) return true;
-    return hasPermissionFlag(currentMemberPermissions, 1n << 9n);
+    return hasPermissionFlag(currentMemberPermissions, SERVER_PERMISSION_FLAGS.manageServer);
   }, [activeServer, currentMemberPermissions, user]);
+  const categoryChannels = useMemo(
+    () => channels.filter((channel) => channel.type === 'CATEGORY').sort((left, right) => left.position - right.position),
+    [channels]
+  );
+  const groupedChannels = useMemo(() => {
+    const categoryMap = new Map<string, Channel[]>();
+    for (const category of categoryChannels) {
+      categoryMap.set(category.id, []);
+    }
+
+    const uncategorized: Channel[] = [];
+
+    for (const channel of channels) {
+      if (channel.type === 'CATEGORY') continue;
+      const categoryId = channel.categoryId ?? null;
+      if (!categoryId || !categoryMap.has(categoryId)) {
+        uncategorized.push(channel);
+        continue;
+      }
+      categoryMap.get(categoryId)!.push(channel);
+    }
+
+    for (const list of categoryMap.values()) {
+      list.sort((left, right) => left.position - right.position);
+    }
+    uncategorized.sort((left, right) => left.position - right.position);
+
+    return {
+      categoryMap,
+      uncategorized
+    };
+  }, [categoryChannels, channels]);
 
   useEffect(() => {
     if (!activeServer) {
@@ -756,6 +850,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         setActiveTextChannelId(channel.id);
         return;
       }
+      if (channel.type === 'CATEGORY') {
+        return;
+      }
 
       if (options?.forceVoiceJoin || connectedVoiceChannelId !== channel.id) {
         setConnectedVoiceChannelId(channel.id);
@@ -767,8 +864,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const openChannelContextMenu = (event: MouseEvent<HTMLButtonElement>, channel: Channel) => {
     event.preventDefault();
+    event.stopPropagation();
     const { x, y } = resolveContextMenuPosition(event.clientX, event.clientY);
     setContextMenu({ type: 'channel', x, y, channel });
+  };
+
+  const openChannelListContextMenu = (event: MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    const { x, y } = resolveContextMenuPosition(event.clientX, event.clientY);
+    setContextMenu({ type: 'channelList', x, y });
   };
 
   const openMemberContextMenu = (event: MouseEvent<HTMLDivElement>, member: RankedMemberEntry) => {
@@ -776,6 +880,41 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     const { x, y } = resolveContextMenuPosition(event.clientX, event.clientY);
     setContextMenu({ type: 'member', x, y, member });
   };
+
+  const openCreateChannelEditor = (type: ChannelEditorState['type'], categoryId: string | null = null) => {
+    if (!canCreateChannels) return;
+    setChannelEditor({
+      mode: 'create',
+      type,
+      name: '',
+      categoryId: type === 'CATEGORY' ? null : categoryId,
+      slowModeSeconds: 0,
+      bitrate: 64000,
+      videoQuality: 'AUTO',
+      userLimit: 0
+    });
+  };
+
+  const openEditChannelEditor = (channel: Channel) => {
+    if (!canManageChannels) return;
+    setChannelEditor({
+      mode: 'edit',
+      channelId: channel.id,
+      type: channel.type,
+      name: channel.name,
+      categoryId: channel.type === 'CATEGORY' ? null : channel.categoryId ?? null,
+      slowModeSeconds: channel.slowModeSeconds ?? 0,
+      bitrate: channel.bitrate ?? 64000,
+      videoQuality: channel.videoQuality ?? 'AUTO',
+      userLimit: channel.userLimit ?? 0
+    });
+  };
+
+  const refreshActiveChannels = useCallback(async () => {
+    if (!activeServerId) return;
+    const loadedChannels = await authRequest<Channel[]>(`/servers/${activeServerId}/channels`);
+    setChannels(loadedChannels);
+  }, [activeServerId, authRequest]);
 
   const copyValue = useCallback(
     async (value: string, label: string) => {
@@ -1160,6 +1299,66 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     }
   };
 
+  const saveChannelEditor = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!activeServer || !channelEditor || isSavingChannelEditor) return;
+
+    const trimmedName = channelEditor.name.trim();
+    if (trimmedName.length < 2 || trimmedName.length > 50) {
+      setError('Channel name must be between 2 and 50 characters.');
+      return;
+    }
+
+    const body: Record<string, unknown> = {
+      name: trimmedName
+    };
+
+    if (channelEditor.type !== 'CATEGORY') {
+      body.categoryId = channelEditor.categoryId ?? null;
+    }
+
+    if (channelEditor.type === 'TEXT') {
+      body.slowModeSeconds = Math.max(0, Math.min(21600, Math.floor(channelEditor.slowModeSeconds)));
+    }
+
+    if (channelEditor.type === 'VOICE') {
+      body.bitrate = Math.max(8000, Math.min(256000, Math.floor(channelEditor.bitrate)));
+      body.videoQuality = channelEditor.videoQuality;
+      body.userLimit = Math.max(0, Math.min(99, Math.floor(channelEditor.userLimit)));
+    }
+
+    if (channelEditor.mode === 'create') {
+      body.type = channelEditor.type;
+    }
+
+    setIsSavingChannelEditor(true);
+    try {
+      if (channelEditor.mode === 'create') {
+        const created = await authRequest<Channel>(`/servers/${activeServer.id}/channels`, {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+        await refreshActiveChannels();
+        if (created.type !== 'CATEGORY') {
+          openChannel(created);
+        }
+      } else if (channelEditor.channelId) {
+        await authRequest<Channel>(`/servers/${activeServer.id}/channels/${channelEditor.channelId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body)
+        });
+        await refreshActiveChannels();
+      }
+
+      setChannelEditor(null);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to save channel');
+    } finally {
+      setIsSavingChannelEditor(false);
+    }
+  };
+
   const joinInvite = async (event: FormEvent) => {
     event.preventDefault();
     const code = parseInviteCode(inviteCode);
@@ -1506,8 +1705,95 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
                 <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_280px]">
                   <aside className="rounded-2xl border border-white/10 bg-black/15 p-3">
-                    <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1">
-                      {channels.map((channel) => (
+                    <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1" onContextMenu={openChannelListContextMenu}>
+                      {categoryChannels.map((category) => (
+                        <section key={category.id} className="space-y-1">
+                          <button
+                            type="button"
+                            onClick={() => openChannel(category)}
+                            onContextMenu={(event) => openChannelContextMenu(event, category)}
+                            className={cn(
+                              'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm uppercase tracking-[0.12em] transition',
+                              activeChannelId === category.id
+                                ? 'border-emerald-200/45 bg-white/10'
+                                : 'border-transparent hover:border-white/20 hover:bg-white/5'
+                            )}
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <span className="text-emerald-100/85">::</span>
+                              <span>{category.name}</span>
+                            </span>
+                          </button>
+
+                          {(groupedChannels.categoryMap.get(category.id) ?? []).map((channel) => (
+                            <div key={channel.id} className="space-y-1 pl-3">
+                              <button
+                                type="button"
+                                onClick={() => openChannel(channel)}
+                                onContextMenu={(event) => openChannelContextMenu(event, channel)}
+                                className={cn(
+                                  'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                                  activeChannelId === channel.id
+                                    ? 'border-emerald-200/45 bg-white/10'
+                                    : 'border-transparent hover:border-white/20 hover:bg-white/5'
+                                )}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  {channel.type === 'VOICE' ? (
+                                    <svg
+                                      aria-hidden="true"
+                                      viewBox="0 0 24 24"
+                                      className="h-4 w-4 text-emerald-100/85"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    >
+                                      <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+                                      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                                      <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+                                    </svg>
+                                  ) : (
+                                    <span className="text-emerald-100/85">#</span>
+                                  )}
+                                  <span>{channel.name}</span>
+                                </span>
+                              </button>
+
+                              {channel.type === 'VOICE' &&
+                              connectedVoiceChannelId === channel.id &&
+                              displayedVoiceParticipants.length > 0 ? (
+                                <div className="flex items-center gap-1.5 px-2">
+                                  {displayedVoiceParticipants.map((participant) => {
+                                    const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
+                                    return avatarUrl ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        key={participant.socketId}
+                                        src={avatarUrl}
+                                        alt={participant.displayName}
+                                        title={participant.displayName}
+                                        className="h-6 w-6 rounded-full border border-white/20 object-cover"
+                                      />
+                                    ) : (
+                                      <span
+                                        key={participant.socketId}
+                                        title={participant.displayName}
+                                        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
+                                      >
+                                        {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </section>
+                      ))}
+
+                      {groupedChannels.uncategorized.map((channel) => (
                         <div key={channel.id} className="space-y-1">
                           <button
                             type="button"
@@ -1543,8 +1829,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             </span>
                           </button>
 
-                  {channel.type === 'VOICE' && connectedVoiceChannelId === channel.id && displayedVoiceParticipants.length > 0 ? (
-                    <div className="flex items-center gap-1.5 px-2">
+                          {channel.type === 'VOICE' && connectedVoiceChannelId === channel.id && displayedVoiceParticipants.length > 0 ? (
+                            <div className="flex items-center gap-1.5 px-2">
                               {displayedVoiceParticipants.map((participant) => {
                                 const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
                                 return avatarUrl ? (
@@ -1570,6 +1856,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                           ) : null}
                         </div>
                       ))}
+
                       {channels.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-white/20 p-4 text-xs text-slate-400">
                           No channels available for this server.
@@ -1591,10 +1878,20 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             Voice channel selected. Realtime connection is required to join voice.
                           </div>
                         ) : null}
+                        {activeChannel.type === 'CATEGORY' ? (
+                          <div className="mb-3 rounded-2xl border border-dashed border-white/20 p-4 text-sm text-slate-300">
+                            Category selected. Pick a text or voice channel under it.
+                          </div>
+                        ) : null}
 
                         {activeChatChannel ? (
                         <div className={`grid gap-4 ${threadParent ? 'lg:grid-cols-[1.6fr_1fr]' : ''}`}>
                           <div>
+                            {activeChatChannel.type === 'TEXT' && activeChatChannel.slowModeSeconds > 0 ? (
+                              <div className="mb-2 rounded-xl border border-amber-200/30 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
+                                Slow mode: {activeChatChannel.slowModeSeconds}s between messages.
+                              </div>
+                            ) : null}
                             <MessageList
                               messages={messages}
                               currentUserId={user?.id}
@@ -1743,9 +2040,64 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
             onContextMenu={(event) => event.preventDefault()}
           >
-            {contextMenu.type === 'channel' ? (
+            {contextMenu.type === 'channelList' ? (
               <>
-                <p className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100/80">#{contextMenu.channel.name}</p>
+                <p className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100/80">Channels</p>
+                <button
+                  type="button"
+                  disabled={!canCreateChannels}
+                  onClick={() => {
+                    openCreateChannelEditor('TEXT');
+                    setContextMenu(null);
+                  }}
+                  className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span>Create text channel</span>
+                  <span className="text-xs text-slate-400">#</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!canCreateChannels}
+                  onClick={() => {
+                    openCreateChannelEditor('VOICE');
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span>Create voice channel</span>
+                  <span className="text-xs text-slate-400">Voice</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!canCreateChannels}
+                  onClick={() => {
+                    openCreateChannelEditor('CATEGORY');
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span>Create category</span>
+                  <span className="text-xs text-slate-400">::</span>
+                </button>
+              </>
+            ) : contextMenu.type === 'channel' ? (
+              <>
+                <p className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100/80">
+                  {contextMenu.channel.type === 'CATEGORY' ? 'Category' : 'Channel'}: {contextMenu.channel.name}
+                </p>
+                {canManageChannels ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openEditChannelEditor(contextMenu.channel);
+                      setContextMenu(null);
+                    }}
+                    className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                  >
+                    <span>{contextMenu.channel.type === 'CATEGORY' ? 'Edit category' : 'Edit channel'}</span>
+                    <span className="text-xs text-slate-400">Edit</span>
+                  </button>
+                ) : null}
                 {contextMenu.channel.type === 'VOICE' ? (
                   <button
                     type="button"
@@ -1758,6 +2110,49 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     <span>Join channel</span>
                     <span className="text-xs text-slate-400">Enter</span>
                   </button>
+                ) : null}
+                {canCreateChannels ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        openCreateChannelEditor(
+                          'TEXT',
+                          contextMenu.channel.type === 'CATEGORY' ? contextMenu.channel.id : contextMenu.channel.categoryId ?? null
+                        );
+                        setContextMenu(null);
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                    >
+                      <span>Create text channel</span>
+                      <span className="text-xs text-slate-400">#</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        openCreateChannelEditor(
+                          'VOICE',
+                          contextMenu.channel.type === 'CATEGORY' ? contextMenu.channel.id : contextMenu.channel.categoryId ?? null
+                        );
+                        setContextMenu(null);
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                    >
+                      <span>Create voice channel</span>
+                      <span className="text-xs text-slate-400">Voice</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        openCreateChannelEditor('CATEGORY');
+                        setContextMenu(null);
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                    >
+                      <span>Create category</span>
+                      <span className="text-xs text-slate-400">::</span>
+                    </button>
+                  </>
                 ) : null}
                 <button
                   type="button"
@@ -1781,17 +2176,19 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   <span>Properties</span>
                   <span className="text-xs text-slate-400">Info</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    markChannelAsRead(contextMenu.channel);
-                    setContextMenu(null);
-                  }}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
-                >
-                  <span>Mark as read</span>
-                  <span className="text-xs text-slate-400">Done</span>
-                </button>
+                {contextMenu.channel.type === 'TEXT' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      markChannelAsRead(contextMenu.channel);
+                      setContextMenu(null);
+                    }}
+                    className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                  >
+                    <span>Mark as read</span>
+                    <span className="text-xs text-slate-400">Done</span>
+                  </button>
+                ) : null}
               </>
             ) : (() => {
                 const audio = memberAudioSettings[contextMenu.member.userId] ?? { volume: 100, muted: false };
@@ -1846,6 +2243,194 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   </>
                 );
               })()}
+          </div>
+        ) : null}
+
+        {user && activeServer && channelEditor ? (
+          <div className="fixed inset-0 z-[77] flex items-center justify-center p-4">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setChannelEditor(null)}
+              aria-label="Close channel editor"
+            />
+            <section className={cn(styles.surfaceStrong, 'relative z-[78] w-full max-w-lg rounded-3xl border p-5')}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-emerald-100/70">
+                    {channelEditor.mode === 'create' ? 'Create' : 'Edit'} {channelEditor.type.toLowerCase()}
+                  </p>
+                  <h3 className="mt-2 text-xl font-semibold text-white">
+                    {channelEditor.mode === 'create'
+                      ? `New ${channelEditor.type === 'CATEGORY' ? 'Category' : 'Channel'}`
+                      : channelEditor.name}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/10"
+                  onClick={() => setChannelEditor(null)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <form className="mt-4 space-y-3" onSubmit={saveChannelEditor}>
+                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                    {channelEditor.type === 'CATEGORY' ? 'Category name' : 'Channel name'}
+                  </p>
+                  <Input
+                    className="mt-2"
+                    value={channelEditor.name}
+                    onChange={(event) =>
+                      setChannelEditor((previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              name: event.target.value
+                            }
+                          : previous
+                      )
+                    }
+                    maxLength={50}
+                    required
+                  />
+                </div>
+
+                {channelEditor.type !== 'CATEGORY' ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Category</p>
+                    <select
+                      value={channelEditor.categoryId ?? ''}
+                      onChange={(event) =>
+                        setChannelEditor((previous) =>
+                          previous
+                            ? {
+                                ...previous,
+                                categoryId: event.target.value || null
+                              }
+                            : previous
+                        )
+                      }
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-100 outline-none transition"
+                    >
+                      <option value="">No category</option>
+                      {categoryChannels
+                        .filter((entry) => (channelEditor.mode === 'edit' ? entry.id !== channelEditor.channelId : true))
+                        .map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                {channelEditor.type === 'TEXT' ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Slow mode (seconds)</p>
+                    <input
+                      type="number"
+                      min={0}
+                      max={21600}
+                      value={channelEditor.slowModeSeconds}
+                      onChange={(event) =>
+                        setChannelEditor((previous) =>
+                          previous
+                            ? {
+                                ...previous,
+                                slowModeSeconds: Number(event.target.value)
+                              }
+                            : previous
+                        )
+                      }
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-100 outline-none transition"
+                    />
+                  </div>
+                ) : null}
+
+                {channelEditor.type === 'VOICE' ? (
+                  <div className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Bitrate</p>
+                      <input
+                        type="number"
+                        min={8000}
+                        max={256000}
+                        step={1000}
+                        value={channelEditor.bitrate}
+                        onChange={(event) =>
+                          setChannelEditor((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  bitrate: Number(event.target.value)
+                                }
+                              : previous
+                          )
+                        }
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-100 outline-none transition"
+                      />
+                    </div>
+
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Video quality (screenshare)</p>
+                      <select
+                        value={channelEditor.videoQuality}
+                        onChange={(event) =>
+                          setChannelEditor((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  videoQuality: event.target.value as VideoQuality
+                                }
+                              : previous
+                          )
+                        }
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-100 outline-none transition"
+                      >
+                        {VOICE_VIDEO_QUALITY_OPTIONS.map((entry) => (
+                          <option key={entry.value} value={entry.value}>
+                            {entry.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">User limit (0 = unlimited)</p>
+                      <input
+                        type="number"
+                        min={0}
+                        max={99}
+                        value={channelEditor.userLimit}
+                        onChange={(event) =>
+                          setChannelEditor((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  userLimit: Number(event.target.value)
+                                }
+                              : previous
+                          )
+                        }
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-100 outline-none transition"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button type="button" variant="soft" onClick={() => setChannelEditor(null)}>
+                    Cancel
+                  </Button>
+                  <Button variant="soft" disabled={isSavingChannelEditor}>
+                    {isSavingChannelEditor ? 'Saving...' : channelEditor.mode === 'create' ? 'Create' : 'Save'}
+                  </Button>
+                </div>
+              </form>
+            </section>
           </div>
         ) : null}
 

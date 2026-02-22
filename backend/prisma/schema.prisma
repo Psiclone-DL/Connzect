@@ -8,8 +8,15 @@ datasource db {
 }
 
 enum ChannelType {
+  CATEGORY
   TEXT
   VOICE
+}
+
+enum VideoQuality {
+  AUTO
+  HD
+  FULL_HD
 }
 
 model User {
@@ -103,16 +110,24 @@ model MemberRole {
 model Channel {
   id                 String                  @id @default(uuid())
   serverId           String
+  categoryId         String?
   name               String
   type               ChannelType
+  slowModeSeconds    Int                     @default(0)
+  bitrate            Int?
+  videoQuality       VideoQuality?
+  userLimit          Int?
   position           Int                     @default(0)
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
   server             Server                  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  category           Channel?                @relation("ChannelCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+  children           Channel[]               @relation("ChannelCategory")
   messages           Message[]
   channelPermissions ChannelRolePermission[]
 
   @@index([serverId])
+  @@index([categoryId])
 }
 
 model ChannelRolePermission {

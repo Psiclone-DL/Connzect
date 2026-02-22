@@ -24,8 +24,13 @@ export const ChannelList = ({ serverId, channels, activeChannelId }: ChannelList
               activeChannelId === channel.id ? 'border-burgundySoft/50 bg-white/5' : ''
             )}
           >
-            <span className="truncate">#{channel.name}</span>
-            <span className="shrink-0 text-xs text-slate-400">{channel.type === 'TEXT' ? 'Text' : 'Voice'}</span>
+            <span className="truncate">
+              {channel.type === 'CATEGORY' ? '::' : channel.type === 'VOICE' ? '🔊' : '#'}
+              {channel.name}
+            </span>
+            <span className="shrink-0 text-xs text-slate-400">
+              {channel.type === 'TEXT' ? 'Text' : channel.type === 'VOICE' ? 'Voice' : 'Category'}
+            </span>
           </Link>
         ))}
       </div>

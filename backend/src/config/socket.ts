@@ -53,6 +53,31 @@ const ensureChannelMessagingAccess = async (channelId: string, userId: string) =
   return { channel, effective };
 };
 
+const assertSlowMode = async (channelId: string, authorId: string, slowModeSeconds: number): Promise<void> => {
+  if (slowModeSeconds <= 0) return;
+
+  const latestOwnMessage = await prisma.message.findFirst({
+    where: {
+      channelId,
+      authorId
+    },
+    orderBy: {
+      createdAt: 'desc'
+    },
+    select: {
+      createdAt: true
+    }
+  });
+
+  if (!latestOwnMessage) return;
+
+  const elapsedSeconds = Math.floor((Date.now() - latestOwnMessage.createdAt.getTime()) / 1000);
+  if (elapsedSeconds >= slowModeSeconds) return;
+
+  const remaining = Math.max(1, slowModeSeconds - elapsedSeconds);
+  throw new Error(`Slow mode is enabled. Wait ${remaining}s before sending another message.`);
+};
+
 const ensureConversationAccess = async (conversationId: string, userId: string): Promise<void> => {
   const membership = await prisma.directParticipant.findUnique({
     where: {
@@ -129,10 +154,13 @@ export const setupSocket = (io: Server): void => {
 
           const { channel, effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
           if (channel.type !== 'TEXT') {
-            throw new Error('Voice channels do not support text chat');
+            throw new Error('Only text channels support text chat');
           }
           if (!hasPermission(effective, Permission.SEND_MESSAGE)) {
             throw new Error('Missing SEND_MESSAGE permission');
+          }
+          if (!hasPermission(effective, Permission.MANAGE_SERVER)) {
+            await assertSlowMode(payload.channelId, authedSocket.data.userId, channel.slowModeSeconds);
           }
 
           if (payload.parentMessageId) {
@@ -179,7 +207,7 @@ export const setupSocket = (io: Server): void => {
 
           const { channel, effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
           if (channel.type !== 'TEXT') {
-            throw new Error('Voice channels do not support text chat');
+            throw new Error('Only text channels support text chat');
           }
 
           const message = await prisma.message.findFirst({
@@ -225,7 +253,7 @@ export const setupSocket = (io: Server): void => {
       try {
         const { channel, effective } = await ensureChannelMessagingAccess(payload.channelId, authedSocket.data.userId);
         if (channel.type !== 'TEXT') {
-          throw new Error('Voice channels do not support text chat');
+          throw new Error('Only text channels support text chat');
         }
 
         const message = await prisma.message.findFirst({
@@ -420,6 +448,16 @@ export const setupSocket = (io: Server): void => {
 
         if (!hasPermission(effective, Permission.CONNECT_VOICE)) {
           throw new Error('Missing CONNECT_VOICE permission');
+        }
+
+        const channelUserLimit = channel.userLimit ?? 0;
+        if (channelUserLimit > 0) {
+          const currentBucket = voiceParticipants.get(channelId);
+          const currentCount = currentBucket?.size ?? 0;
+          const alreadyInTarget = authedSocket.data.voiceChannelId === channelId;
+          if (!alreadyInTarget && currentCount >= channelUserLimit) {
+            throw new Error('Voice channel is full');
+          }
         }
 
         if (authedSocket.data.voiceChannelId && authedSocket.data.voiceChannelId !== channelId) {

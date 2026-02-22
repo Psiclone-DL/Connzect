@@ -1,10 +1,43 @@
 import { Request, Response } from 'express';
+import { ChannelType, VideoQuality } from '@prisma/client';
 import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
 import { routeParam } from '../../utils/params';
 import { Permission, hasPermission } from '../../utils/permissions';
 import { applyChannelOverrides, getMemberContext, requireServerPermission } from '../servers/server-access';
+
+const DEFAULT_VOICE_BITRATE = 64000;
+const DEFAULT_VOICE_VIDEO_QUALITY: VideoQuality = 'AUTO';
+
+const resolveCategoryId = async (
+  serverId: string,
+  rawCategoryId: unknown,
+  channelId?: string
+): Promise<string | null | undefined> => {
+  if (rawCategoryId === undefined) {
+    return undefined;
+  }
+
+  if (rawCategoryId === null || rawCategoryId === '') {
+    return null;
+  }
+
+  if (typeof rawCategoryId !== 'string') {
+    throw new HttpError(400, 'categoryId must be a string');
+  }
+
+  const category = await prisma.channel.findUnique({ where: { id: rawCategoryId } });
+  if (!category || category.serverId !== serverId || category.type !== ChannelType.CATEGORY) {
+    throw new HttpError(400, 'Invalid categoryId');
+  }
+
+  if (channelId && category.id === channelId) {
+    throw new HttpError(400, 'Channel cannot be its own category');
+  }
+
+  return category.id;
+};
 
 export const listVisibleChannels = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
@@ -40,11 +73,29 @@ export const createChannel = async (req: Request, res: Response): Promise<void> 
     orderBy: { position: 'desc' }
   });
 
+  const type = req.body.type as ChannelType;
+  const name = String(req.body.name).trim();
+  if (name.length < 2 || name.length > 50) {
+    throw new HttpError(400, 'Channel name must be between 2 and 50 characters');
+  }
+
+  const resolvedCategoryId = type === ChannelType.CATEGORY ? null : await resolveCategoryId(serverId, req.body.categoryId);
+  const slowModeSeconds = type === ChannelType.TEXT ? Number(req.body.slowModeSeconds ?? 0) : 0;
+  const bitrate = type === ChannelType.VOICE ? Number(req.body.bitrate ?? DEFAULT_VOICE_BITRATE) : null;
+  const videoQuality = type === ChannelType.VOICE ? (req.body.videoQuality as VideoQuality | undefined) ?? DEFAULT_VOICE_VIDEO_QUALITY : null;
+  const parsedUserLimit = type === ChannelType.VOICE ? Number(req.body.userLimit ?? 0) : 0;
+  const userLimit = type === ChannelType.VOICE && parsedUserLimit > 0 ? parsedUserLimit : null;
+
   const channel = await prisma.channel.create({
     data: {
       serverId,
-      name: req.body.name,
-      type: req.body.type,
+      name,
+      type,
+      categoryId: resolvedCategoryId ?? null,
+      slowModeSeconds,
+      bitrate,
+      videoQuality,
+      userLimit,
       position: (highestPosition?.position ?? -1) + 1
     }
   });
@@ -52,7 +103,7 @@ export const createChannel = async (req: Request, res: Response): Promise<void> 
   res.status(StatusCodes.CREATED).json(channel);
 };
 
-export const renameChannel = async (req: Request, res: Response): Promise<void> => {
+export const updateChannel = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
   const serverId = routeParam(req.params.serverId);
@@ -64,10 +115,76 @@ export const renameChannel = async (req: Request, res: Response): Promise<void> 
     throw new HttpError(404, 'Channel not found');
   }
 
+  const nextName = typeof req.body.name === 'string' ? req.body.name.trim() : undefined;
+  if (nextName !== undefined && (nextName.length < 2 || nextName.length > 50)) {
+    throw new HttpError(400, 'Channel name must be between 2 and 50 characters');
+  }
+
+  if (channel.type === ChannelType.CATEGORY && req.body.categoryId !== undefined && req.body.categoryId !== null) {
+    throw new HttpError(400, 'Category channels cannot belong to another category');
+  }
+
+  const resolvedCategoryId =
+    channel.type === ChannelType.CATEGORY
+      ? null
+      : await resolveCategoryId(serverId, req.body.categoryId, channel.id);
+
+  const nextSlowModeSeconds =
+    channel.type === ChannelType.TEXT
+      ? req.body.slowModeSeconds === undefined
+        ? channel.slowModeSeconds
+        : Number(req.body.slowModeSeconds)
+      : 0;
+
+  const nextBitrate =
+    channel.type === ChannelType.VOICE
+      ? req.body.bitrate === undefined
+        ? channel.bitrate ?? DEFAULT_VOICE_BITRATE
+        : Number(req.body.bitrate)
+      : null;
+
+  const nextVideoQuality =
+    channel.type === ChannelType.VOICE
+      ? req.body.videoQuality === undefined
+        ? channel.videoQuality ?? DEFAULT_VOICE_VIDEO_QUALITY
+        : (req.body.videoQuality as VideoQuality)
+      : null;
+
+  const nextUserLimit =
+    channel.type === ChannelType.VOICE
+      ? req.body.userLimit === undefined
+        ? channel.userLimit
+        : Number(req.body.userLimit) > 0
+          ? Number(req.body.userLimit)
+          : null
+      : null;
+
+  const hasAnyUpdate =
+    nextName !== undefined ||
+    req.body.categoryId !== undefined ||
+    req.body.slowModeSeconds !== undefined ||
+    req.body.bitrate !== undefined ||
+    req.body.videoQuality !== undefined ||
+    req.body.userLimit !== undefined;
+
+  if (!hasAnyUpdate) {
+    throw new HttpError(400, 'No channel updates were provided');
+  }
+
   const updated = await prisma.channel.update({
     where: { id: channelId },
     data: {
-      name: req.body.name
+      name: nextName ?? channel.name,
+      categoryId:
+        channel.type === ChannelType.CATEGORY
+          ? null
+          : resolvedCategoryId === undefined
+            ? channel.categoryId
+            : resolvedCategoryId,
+      slowModeSeconds: nextSlowModeSeconds,
+      bitrate: nextBitrate,
+      videoQuality: nextVideoQuality,
+      userLimit: nextUserLimit
     }
   });
 
