@@ -1,3 +1,4 @@
+import { MouseEvent } from 'react';
 import type { ConnzectServer } from '@/types';
 import { cn } from '@/lib/utils';
 import { ServerCard } from './server-card';
@@ -11,6 +12,7 @@ interface SidebarProps {
   onOpenServer: (serverId: string) => void;
   onJoinServer?: () => void;
   onServerPicked?: () => void;
+  onServerContextMenu?: (event: MouseEvent<HTMLButtonElement>, server: ConnzectServer) => void;
 }
 
 export const Sidebar = ({
@@ -20,7 +22,8 @@ export const Sidebar = ({
   className,
   onOpenServer,
   onJoinServer,
-  onServerPicked
+  onServerPicked,
+  onServerContextMenu
 }: SidebarProps) => {
   const handleOpen = (serverId: string) => {
     onOpenServer(serverId);
@@ -68,6 +71,7 @@ export const Sidebar = ({
             collapsed={collapsed}
             isActive={activeServerId === server.id}
             onOpen={handleOpen}
+            onContextMenu={onServerContextMenu}
           />
         ))}
 

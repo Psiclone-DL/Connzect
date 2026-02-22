@@ -177,6 +177,12 @@ type ContextMenuState =
       channel: Channel;
     }
   | {
+      type: 'server';
+      x: number;
+      y: number;
+      server: ConnzectServer;
+    }
+  | {
       type: 'member';
       x: number;
       y: number;
@@ -927,6 +933,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     setContextMenu({ type: 'member', x, y, member });
   };
 
+  const openServerContextMenu = (event: MouseEvent<HTMLButtonElement>, server: ConnzectServer) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const { x, y } = resolveContextMenuPosition(event.clientX, event.clientY);
+    setContextMenu({ type: 'server', x, y, server });
+  };
+
   const openCreateChannelEditor = (type: ChannelEditorState['type'], categoryId: string | null = null) => {
     if (!canCreateChannels) return;
     setChannelEditor({
@@ -1674,32 +1687,49 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     }
   };
 
-  const leaveServer = async () => {
-    if (!activeServer || !user || isLeavingServer) return;
+  const openServerOptions = (server: ConnzectServer) => {
+    if (activeServerId !== server.id) {
+      openServerWidget(server.id);
+      window.setTimeout(() => {
+        setServerSettingsTab('general');
+        setServerSettingsOpen(true);
+      }, 240);
+      return;
+    }
+
+    setServerSettingsTab('general');
+    setServerSettingsOpen(true);
+  };
+
+  const leaveServer = async (serverToLeave?: ConnzectServer) => {
+    const targetServer = serverToLeave ?? activeServer;
+    if (!targetServer || !user || isLeavingServer) return;
 
     const ownerExitWarning =
-      activeServer.ownerId === user.id
+      targetServer.ownerId === user.id
         ? 'You are the owner. Leaving will transfer ownership to another member, or delete the server if you are alone.\n\n'
         : '';
 
-    if (!window.confirm(`${ownerExitWarning}Leave "${activeServer.name}"?`)) {
+    if (!window.confirm(`${ownerExitWarning}Leave "${targetServer.name}"?`)) {
       return;
     }
 
     setIsLeavingServer(true);
     try {
-      await authRequest(`/servers/${activeServer.id}/members/me`, {
+      await authRequest(`/servers/${targetServer.id}/members/me`, {
         method: 'DELETE'
       });
       setError(null);
-      if (closeTimerRef.current) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
+      setServers((previous) => previous.filter((server) => server.id !== targetServer.id));
+      if (activeServerId === targetServer.id) {
+        if (closeTimerRef.current) {
+          window.clearTimeout(closeTimerRef.current);
+          closeTimerRef.current = null;
+        }
+        setActiveServerId(null);
+        setIsClosingServerView(false);
+        setIsOpeningServerView(false);
       }
-      setServers((previous) => previous.filter((server) => server.id !== activeServer.id));
-      setActiveServerId(null);
-      setIsClosingServerView(false);
-      setIsOpeningServerView(false);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to leave server');
     } finally {
@@ -1918,6 +1948,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               activeServerId={activeServerId}
               onOpenServer={openServerWidget}
               onJoinServer={user ? () => openServerModal('join') : undefined}
+              onServerContextMenu={openServerContextMenu}
               onServerPicked={() => setMobileSidebarOpen(false)}
               className="h-full"
             />
@@ -1936,6 +1967,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               collapsed={sidebarCollapsed}
               onOpenServer={openServerWidget}
               onJoinServer={user ? () => openServerModal('join') : undefined}
+              onServerContextMenu={openServerContextMenu}
               className="h-[calc(100vh-7.5rem)]"
             />
           </div>
@@ -1972,7 +2004,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     ) : null}
                     <Button
                       variant="danger"
-                      onClick={leaveServer}
+                      onClick={() => {
+                        void leaveServer();
+                      }}
                       disabled={isLeavingServer}
                       title="Leave server"
                     >
@@ -2617,6 +2651,32 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     <span className="text-xs text-slate-400">Done</span>
                   </button>
                 ) : null}
+              </>
+            ) : contextMenu.type === 'server' ? (
+              <>
+                <p className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100/80">Server: {contextMenu.server.name}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    openServerOptions(contextMenu.server);
+                    setContextMenu(null);
+                  }}
+                  className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                >
+                  <span>Options</span>
+                  <span className="text-xs text-slate-400">Settings</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void leaveServer(contextMenu.server);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-red-200 transition hover:bg-red-500/15"
+                >
+                  <span>Leave server</span>
+                  <span className="text-xs text-red-300/80">Leave</span>
+                </button>
               </>
             ) : (() => {
                 const audio = memberAudioSettings[contextMenu.member.userId] ?? { volume: 100, muted: false };

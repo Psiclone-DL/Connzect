@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { MouseEvent, useEffect, useRef, useState } from 'react';
 import type { ConnzectServer } from '@/types';
 import { cn } from '@/lib/utils';
 import { resolveAssetUrl } from '@/lib/assets';
@@ -9,6 +9,7 @@ interface ServerCardProps {
   collapsed?: boolean;
   isActive?: boolean;
   onOpen: (serverId: string) => void;
+  onContextMenu?: (event: MouseEvent<HTMLButtonElement>, server: ConnzectServer) => void;
 }
 
 const getInitials = (name: string) => {
@@ -25,7 +26,7 @@ const getInitials = (name: string) => {
   return initials || trimmed.slice(0, 2).toUpperCase();
 };
 
-export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen }: ServerCardProps) => {
+export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen, onContextMenu }: ServerCardProps) => {
   const initials = getInitials(server.name);
   const iconUrl = resolveAssetUrl(server.iconUrl);
   const [showIcon, setShowIcon] = useState(Boolean(iconUrl));
@@ -64,6 +65,7 @@ export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen
       type="button"
       title={server.name}
       onClick={handleOpen}
+      onContextMenu={(event) => onContextMenu?.(event, server)}
       className={cn(
         styles.surface,
         styles.cardLift,
