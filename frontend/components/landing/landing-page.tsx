@@ -242,6 +242,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Record<string, boolean>>({});
   const [uncategorizedCollapsed, setUncategorizedCollapsed] = useState(false);
   const [draggedChannelId, setDraggedChannelId] = useState<string | null>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<{ kind: 'category' | 'channel' | 'uncategorized'; id: string | null } | null>(
+    null
+  );
   const [isReorderingChannels, setIsReorderingChannels] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [serverSettingsTab, setServerSettingsTab] = useState<'general' | 'permissions'>('general');
@@ -1124,16 +1127,19 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const handleDragStart = (channelId: string) => {
     if (!canMoveChannels) return;
     setDraggedChannelId(channelId);
+    setDragOverTarget(null);
   };
 
   const handleDragEnd = () => {
     setDraggedChannelId(null);
+    setDragOverTarget(null);
   };
 
   const dropOnCategory = async (categoryId: string | null) => {
     if (!canMoveChannels || !draggedChannelId) return;
     const next = buildReorderedChannels(draggedChannelId, { kind: 'category', categoryId });
     setDraggedChannelId(null);
+    setDragOverTarget(null);
     if (!next) return;
     await persistChannelReorder(next);
   };
@@ -1142,6 +1148,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (!canMoveChannels || !draggedChannelId) return;
     const next = buildReorderedChannels(draggedChannelId, { kind: 'channel', channelId });
     setDraggedChannelId(null);
+    setDragOverTarget(null);
     if (!next) return;
     await persistChannelReorder(next);
   };
@@ -1944,10 +1951,24 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                         return (
                           <section
                             key={category.id}
-                            className="space-y-1"
+                            className={cn(
+                              'space-y-1 rounded-xl transition',
+                              dragOverTarget?.kind === 'category' && dragOverTarget.id === category.id
+                                ? 'ring-1 ring-emerald-200/55 bg-emerald-300/10'
+                                : ''
+                            )}
                             onDragOver={(event) => {
                               if (!canMoveChannels) return;
                               event.preventDefault();
+                              setDragOverTarget({ kind: 'category', id: category.id });
+                            }}
+                            onDragLeave={(event) => {
+                              if (!canMoveChannels) return;
+                              const nextTarget = event.relatedTarget as Node | null;
+                              if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                              setDragOverTarget((previous) =>
+                                previous?.kind === 'category' && previous.id === category.id ? null : previous
+                              );
                             }}
                             onDrop={(event) => {
                               if (!canMoveChannels) return;
@@ -1965,6 +1986,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               onDragOver={(event) => {
                                 if (!canMoveChannels) return;
                                 event.preventDefault();
+                                setDragOverTarget({ kind: 'channel', id: category.id });
+                              }}
+                              onDragLeave={(event) => {
+                                if (!canMoveChannels) return;
+                                const nextTarget = event.relatedTarget as Node | null;
+                                if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                                setDragOverTarget((previous) =>
+                                  previous?.kind === 'channel' && previous.id === category.id ? null : previous
+                                );
                               }}
                               onDrop={(event) => {
                                 if (!canMoveChannels) return;
@@ -1979,7 +2009,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 }))
                               }
                               onContextMenu={(event) => openChannelContextMenu(event, category)}
-                              className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-sm uppercase tracking-[0.12em] transition hover:border-white/20 hover:bg-white/5"
+                              className={cn(
+                                'flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-sm uppercase tracking-[0.12em] transition hover:border-white/20 hover:bg-white/5',
+                                dragOverTarget?.kind === 'channel' && dragOverTarget.id === category.id
+                                  ? 'border-emerald-200/65 bg-emerald-300/15'
+                                  : ''
+                              )}
                             >
                               <span className="inline-flex items-center gap-2">
                                 <span className="text-emerald-100/85">{categoryCollapsed ? '>' : 'v'}</span>
@@ -2000,6 +2035,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                       onDragOver={(event) => {
                                         if (!canMoveChannels) return;
                                         event.preventDefault();
+                                        setDragOverTarget({ kind: 'channel', id: channel.id });
+                                      }}
+                                      onDragLeave={(event) => {
+                                        if (!canMoveChannels) return;
+                                        const nextTarget = event.relatedTarget as Node | null;
+                                        if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                                        setDragOverTarget((previous) =>
+                                          previous?.kind === 'channel' && previous.id === channel.id ? null : previous
+                                        );
                                       }}
                                       onDrop={(event) => {
                                         if (!canMoveChannels) return;
@@ -2013,7 +2057,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                         'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
                                         activeChannelId === channel.id
                                           ? 'border-emerald-200/45 bg-white/10'
-                                          : 'border-transparent hover:border-white/20 hover:bg-white/5'
+                                          : 'border-transparent hover:border-white/20 hover:bg-white/5',
+                                        dragOverTarget?.kind === 'channel' && dragOverTarget.id === channel.id
+                                          ? 'border-emerald-200/65 bg-emerald-300/15'
+                                          : ''
                                       )}
                                     >
                                       <span className="inline-flex items-center gap-2">
@@ -2075,10 +2122,20 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
                       {groupedChannels.uncategorized.length > 0 ? (
                         <section
-                          className="space-y-1"
+                          className={cn(
+                            'space-y-1 rounded-xl transition',
+                            dragOverTarget?.kind === 'uncategorized' ? 'ring-1 ring-emerald-200/55 bg-emerald-300/10' : ''
+                          )}
                           onDragOver={(event) => {
                             if (!canMoveChannels) return;
                             event.preventDefault();
+                            setDragOverTarget({ kind: 'uncategorized', id: null });
+                          }}
+                          onDragLeave={(event) => {
+                            if (!canMoveChannels) return;
+                            const nextTarget = event.relatedTarget as Node | null;
+                            if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                            setDragOverTarget((previous) => (previous?.kind === 'uncategorized' ? null : previous));
                           }}
                           onDrop={(event) => {
                             if (!canMoveChannels) return;
@@ -2111,6 +2168,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                     onDragOver={(event) => {
                                       if (!canMoveChannels) return;
                                       event.preventDefault();
+                                      setDragOverTarget({ kind: 'channel', id: channel.id });
+                                    }}
+                                    onDragLeave={(event) => {
+                                      if (!canMoveChannels) return;
+                                      const nextTarget = event.relatedTarget as Node | null;
+                                      if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                                      setDragOverTarget((previous) =>
+                                        previous?.kind === 'channel' && previous.id === channel.id ? null : previous
+                                      );
                                     }}
                                     onDrop={(event) => {
                                       if (!canMoveChannels) return;
@@ -2124,7 +2190,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                       'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
                                       activeChannelId === channel.id
                                         ? 'border-emerald-200/45 bg-white/10'
-                                        : 'border-transparent hover:border-white/20 hover:bg-white/5'
+                                        : 'border-transparent hover:border-white/20 hover:bg-white/5',
+                                      dragOverTarget?.kind === 'channel' && dragOverTarget.id === channel.id
+                                        ? 'border-emerald-200/65 bg-emerald-300/15'
+                                        : ''
                                     )}
                                   >
                                     <span className="inline-flex items-center gap-2">
