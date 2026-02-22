@@ -1887,6 +1887,41 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     }
   };
 
+  const deleteChannel = async (channel: Channel) => {
+    if (!activeServer || !canManageChannels) return;
+
+    const label = channel.type === 'CATEGORY' ? 'category' : 'channel';
+    if (!window.confirm(`Delete ${label} "${channel.name}"?`)) {
+      return;
+    }
+
+    try {
+      await authRequest(`/servers/${activeServer.id}/channels/${channel.id}`, {
+        method: 'DELETE'
+      });
+
+      if (connectedVoiceChannelId === channel.id) {
+        setConnectedVoiceChannelId('');
+        setConnectedVoiceChannelName('');
+        setVoiceParticipants([]);
+        setIsSharingScreen(false);
+      }
+
+      if (activeChannelId === channel.id) {
+        setActiveChannelId('');
+      }
+
+      if (activeTextChannelId === channel.id) {
+        setActiveTextChannelId('');
+      }
+
+      await refreshActiveChannels();
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : `Failed to delete ${label}`);
+    }
+  };
+
   const joinInvite = async (event: FormEvent) => {
     event.preventDefault();
     const code = parseInviteCode(inviteCode);
@@ -2919,6 +2954,19 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   >
                     <span>{contextMenu.channel.type === 'CATEGORY' ? 'Edit category' : 'Edit channel'}</span>
                     <span className="text-xs text-slate-400">Edit</span>
+                  </button>
+                ) : null}
+                {canManageChannels ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void deleteChannel(contextMenu.channel);
+                      setContextMenu(null);
+                    }}
+                    className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-red-200 transition hover:bg-red-500/15"
+                  >
+                    <span>{contextMenu.channel.type === 'CATEGORY' ? 'Delete category' : 'Delete channel'}</span>
+                    <span className="text-xs text-red-300/80">Delete</span>
                   </button>
                 ) : null}
                 {contextMenu.channel.type === 'VOICE' ? (
