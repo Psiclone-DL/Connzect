@@ -123,6 +123,16 @@ export const ServerCard = ({
       <div className={cn('min-w-0', collapsed ? 'hidden' : 'block')}>
         <p className="truncate text-sm font-medium text-slate-100">{server.name}</p>
       </div>
+      {dropIndicator ? (
+        <span
+          className={cn(
+            'ml-auto inline-flex items-center rounded-md border border-emerald-200/40 bg-emerald-300/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-100',
+            collapsed ? 'hidden' : 'inline-flex'
+          )}
+        >
+          {dropIndicator === 'before' ? 'Sus' : 'Jos'}
+        </span>
+      ) : null}
     </button>
   );
 };
