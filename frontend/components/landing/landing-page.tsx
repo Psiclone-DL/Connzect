@@ -2111,49 +2111,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                     <span className="text-xs text-slate-400">Enter</span>
                   </button>
                 ) : null}
-                {canCreateChannels ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        openCreateChannelEditor(
-                          'TEXT',
-                          contextMenu.channel.type === 'CATEGORY' ? contextMenu.channel.id : contextMenu.channel.categoryId ?? null
-                        );
-                        setContextMenu(null);
-                      }}
-                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
-                    >
-                      <span>Create text channel</span>
-                      <span className="text-xs text-slate-400">#</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        openCreateChannelEditor(
-                          'VOICE',
-                          contextMenu.channel.type === 'CATEGORY' ? contextMenu.channel.id : contextMenu.channel.categoryId ?? null
-                        );
-                        setContextMenu(null);
-                      }}
-                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
-                    >
-                      <span>Create voice channel</span>
-                      <span className="text-xs text-slate-400">Voice</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        openCreateChannelEditor('CATEGORY');
-                        setContextMenu(null);
-                      }}
-                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
-                    >
-                      <span>Create category</span>
-                      <span className="text-xs text-slate-400">::</span>
-                    </button>
-                  </>
-                ) : null}
                 <button
                   type="button"
                   onClick={() => {
