@@ -14,6 +14,7 @@ const AUTO_UPDATES_ENABLED =
 const WEB_ENDPOINT_TIMEOUT_MS = 12_000;
 const RECONNECT_INTERVAL_MS = 10_000;
 const INITIAL_UPDATE_CHECK_TIMEOUT_MS = 10_000;
+const PERIODIC_UPDATE_CHECK_MS = 30 * 60 * 1000;
 const SPLASH_WIDTH = 620;
 const SPLASH_HEIGHT = 420;
 const SPLASH_TITLE = 'Connzect';
@@ -28,6 +29,8 @@ let splashWindow = null;
 let installingUpdate = false;
 let reconnectTimer = null;
 let restartCountdownTimer = null;
+let periodicUpdateCheckTimer = null;
+let updateCheckInFlight = false;
 let hasDownloadedUpdate = false;
 let splashLoaded = false;
 let startupCompleted = false;
@@ -762,11 +765,27 @@ const setupAutoUpdates = () => {
 
   log('Using GitHub Releases auto-update provider.');
 
-  const checkUpdates = () => {
-    autoUpdater.checkForUpdates().catch((error) => {
-      log('Failed checking updates:', error?.message || String(error));
-      markInitialUpdateCheckSettled();
-    });
+  const checkUpdates = (reason) => {
+    if (updateCheckInFlight) {
+      log(`Skipping update check (${reason}); check already in progress.`);
+      return;
+    }
+
+    if (installingUpdate || hasDownloadedUpdate || showingUpdateProgress) {
+      log(`Skipping update check (${reason}); update flow already active.`);
+      return;
+    }
+
+    updateCheckInFlight = true;
+    autoUpdater
+      .checkForUpdates()
+      .catch((error) => {
+        log('Failed checking updates:', error?.message || String(error));
+        markInitialUpdateCheckSettled();
+      })
+      .finally(() => {
+        updateCheckInFlight = false;
+      });
   };
 
   if (waitingInitialUpdateCheck) {
@@ -776,8 +795,15 @@ const setupAutoUpdates = () => {
     }, INITIAL_UPDATE_CHECK_TIMEOUT_MS);
   }
 
-  checkUpdates();
-  setInterval(checkUpdates, 30 * 60 * 1000);
+  checkUpdates('startup');
+
+  if (periodicUpdateCheckTimer) {
+    clearInterval(periodicUpdateCheckTimer);
+  }
+
+  periodicUpdateCheckTimer = setInterval(() => {
+    checkUpdates('periodic-30m');
+  }, PERIODIC_UPDATE_CHECK_MS);
 };
 
 app.on('window-all-closed', () => {
@@ -787,6 +813,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (periodicUpdateCheckTimer) {
+    clearInterval(periodicUpdateCheckTimer);
+    periodicUpdateCheckTimer = null;
+  }
   stopReconnectLoop();
   closeSplashWindow();
 });
