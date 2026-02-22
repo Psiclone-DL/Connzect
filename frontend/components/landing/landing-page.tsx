@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { CreateServerForm } from '@/components/forms/create-server-form';
@@ -201,6 +201,11 @@ type ChannelEditorState = {
   userLimit: number;
 };
 
+type DragOverTarget =
+  | { kind: 'category'; id: string | null; position: 'before' | 'after' }
+  | { kind: 'channel'; id: string }
+  | { kind: 'uncategorized' };
+
 export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const router = useRouter();
   const { user, loading, logout, authRequest, accessToken } = useAuth();
@@ -242,9 +247,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Record<string, boolean>>({});
   const [uncategorizedCollapsed, setUncategorizedCollapsed] = useState(false);
   const [draggedChannelId, setDraggedChannelId] = useState<string | null>(null);
-  const [dragOverTarget, setDragOverTarget] = useState<{ kind: 'category' | 'channel' | 'uncategorized'; id: string | null } | null>(
-    null
-  );
+  const [dragOverTarget, setDragOverTarget] = useState<DragOverTarget | null>(null);
   const [isReorderingChannels, setIsReorderingChannels] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [serverSettingsTab, setServerSettingsTab] = useState<'general' | 'permissions'>('general');
@@ -984,7 +987,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   );
 
   const buildReorderedChannels = useCallback(
-    (dragId: string, dropTarget: { kind: 'category'; categoryId: string | null } | { kind: 'channel'; channelId: string }) => {
+    (
+      dragId: string,
+      dropTarget:
+        | { kind: 'category'; categoryId: string | null; position?: 'before' | 'after' }
+        | { kind: 'channel'; channelId: string }
+    ) => {
       const source = channels.find((channel) => channel.id === dragId);
       if (!source) return null;
 
@@ -1022,7 +1030,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
             if (dropTarget.categoryId === source.id) return null;
             const targetIndex = nextCategories.findIndex((entry) => entry.id === dropTarget.categoryId);
             if (targetIndex < 0) return null;
-            nextCategories.splice(targetIndex, 0, source);
+            const insertIndex = dropTarget.position === 'after' ? targetIndex + 1 : targetIndex;
+            nextCategories.splice(insertIndex, 0, source);
           }
         } else {
           const target = channels.find((channel) => channel.id === dropTarget.channelId);
@@ -1161,9 +1170,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const shouldIgnoreClickAfterDrag = () => Date.now() - lastDragEndedAtRef.current < 180;
 
-  const dropOnCategory = async (categoryId: string | null) => {
+  const resolveCategoryDropPosition = (event: DragEvent<HTMLElement>): 'before' | 'after' => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientY <= bounds.top + bounds.height / 2 ? 'before' : 'after';
+  };
+
+  const dropOnCategory = async (categoryId: string | null, position: 'before' | 'after' = 'after') => {
     if (!canMoveChannels || !draggedChannelId) return;
-    const next = buildReorderedChannels(draggedChannelId, { kind: 'category', categoryId });
+    const next = buildReorderedChannels(draggedChannelId, { kind: 'category', categoryId, position });
     setDraggedChannelId(null);
     setDragOverTarget(null);
     if (!next) return;
@@ -1991,7 +2005,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             onDragOver={(event) => {
                               if (!canMoveChannels) return;
                               event.preventDefault();
-                              setDragOverTarget({ kind: 'category', id: category.id });
+                              setDragOverTarget({ kind: 'category', id: category.id, position: 'after' });
                             }}
                             onDragLeave={(event) => {
                               if (!canMoveChannels) return;
@@ -2005,7 +2019,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               if (!canMoveChannels) return;
                               event.preventDefault();
                               event.stopPropagation();
-                              void dropOnCategory(category.id);
+                              void dropOnCategory(category.id, 'after');
                             }}
                           >
                             <button
@@ -2017,6 +2031,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               onDragOver={(event) => {
                                 if (!canMoveChannels) return;
                                 event.preventDefault();
+                                if (draggedChannelId && channels.find((entry) => entry.id === draggedChannelId)?.type === 'CATEGORY') {
+                                  setDragOverTarget({
+                                    kind: 'category',
+                                    id: category.id,
+                                    position: resolveCategoryDropPosition(event)
+                                  });
+                                  return;
+                                }
                                 setDragOverTarget({ kind: 'channel', id: category.id });
                               }}
                               onDragLeave={(event) => {
@@ -2031,6 +2053,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 if (!canMoveChannels) return;
                                 event.preventDefault();
                                 event.stopPropagation();
+                                if (draggedChannelId && channels.find((entry) => entry.id === draggedChannelId)?.type === 'CATEGORY') {
+                                  void dropOnCategory(category.id, resolveCategoryDropPosition(event));
+                                  return;
+                                }
                                 void dropBeforeChannel(category.id);
                               }}
                               onClick={() => {
@@ -2045,6 +2071,16 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 'flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-sm uppercase tracking-[0.12em] transition hover:border-white/20 hover:bg-white/5',
                                 canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
                                 draggedChannelId === category.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
+                                dragOverTarget?.kind === 'category' &&
+                                  dragOverTarget.id === category.id &&
+                                  dragOverTarget.position === 'before'
+                                  ? 'border-t-2 border-t-emerald-200'
+                                  : '',
+                                dragOverTarget?.kind === 'category' &&
+                                  dragOverTarget.id === category.id &&
+                                  dragOverTarget.position === 'after'
+                                  ? 'border-b-2 border-b-emerald-200'
+                                  : '',
                                 dragOverTarget?.kind === 'channel' && dragOverTarget.id === category.id
                                   ? 'border-emerald-200/65 bg-emerald-300/15'
                                   : ''
@@ -2170,7 +2206,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                           onDragOver={(event) => {
                             if (!canMoveChannels) return;
                             event.preventDefault();
-                            setDragOverTarget({ kind: 'uncategorized', id: null });
+                            setDragOverTarget({ kind: 'uncategorized' });
                           }}
                           onDragLeave={(event) => {
                             if (!canMoveChannels) return;
@@ -2182,7 +2218,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             if (!canMoveChannels) return;
                             event.preventDefault();
                             event.stopPropagation();
-                            void dropOnCategory(null);
+                            void dropOnCategory(null, 'after');
                           }}
                         >
                           <button
