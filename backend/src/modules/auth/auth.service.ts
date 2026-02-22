@@ -5,6 +5,13 @@ import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/jwt';
 
+const publicUserSelect = {
+  id: true,
+  displayName: true,
+  email: true,
+  avatarUrl: true
+} as const;
+
 const hashRefreshToken = (token: string): string =>
   crypto.createHash('sha256').update(token).digest('hex');
 
@@ -74,12 +81,10 @@ export const login = async (email: string, password: string) => {
   return {
     accessToken,
     refreshToken,
-    user: {
-      id: user.id,
-      displayName: user.displayName,
-      email: user.email,
-      avatarUrl: user.avatarUrl
-    }
+    user: await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: publicUserSelect
+    })
   };
 };
 
@@ -124,12 +129,10 @@ export const refreshSession = async (refreshToken: string) => {
   return {
     accessToken: newAccessToken,
     refreshToken: newRefreshToken,
-    user: {
-      id: user.id,
-      displayName: user.displayName,
-      email: user.email,
-      avatarUrl: user.avatarUrl
-    }
+    user: await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: publicUserSelect
+    })
   };
 };
 
@@ -144,5 +147,56 @@ export const logout = async (refreshToken: string): Promise<void> => {
     data: {
       revokedAt: new Date()
     }
+  });
+};
+
+export const getMe = async (userId: string) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: publicUserSelect
+  });
+
+  if (!user) {
+    throw new HttpError(StatusCodes.UNAUTHORIZED, 'User no longer exists');
+  }
+
+  return user;
+};
+
+export const updateMe = async (
+  userId: string,
+  updates: {
+    displayName?: string;
+    avatarUrl?: string;
+  }
+) => {
+  const displayName = typeof updates.displayName === 'string' ? updates.displayName.trim() : undefined;
+  if (displayName !== undefined && (displayName.length < 2 || displayName.length > 32)) {
+    throw new HttpError(StatusCodes.BAD_REQUEST, 'Display name must be between 2 and 32 characters');
+  }
+
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    select: publicUserSelect
+  });
+
+  if (!existing) {
+    throw new HttpError(StatusCodes.UNAUTHORIZED, 'User no longer exists');
+  }
+
+  const hasDisplayNameChange = displayName !== undefined && displayName !== existing.displayName;
+  const hasAvatarChange = updates.avatarUrl !== undefined && updates.avatarUrl !== existing.avatarUrl;
+
+  if (!hasDisplayNameChange && !hasAvatarChange) {
+    throw new HttpError(StatusCodes.BAD_REQUEST, 'No profile changes were provided');
+  }
+
+  return prisma.user.update({
+    where: { id: userId },
+    data: {
+      displayName: hasDisplayNameChange ? displayName : existing.displayName,
+      avatarUrl: hasAvatarChange ? updates.avatarUrl : existing.avatarUrl
+    },
+    select: publicUserSelect
   });
 };

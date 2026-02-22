@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import * as authService from './auth.service';
+import { HttpError } from '../../utils/httpError';
 
 const buildRefreshCookieOptions = (req: Request) => {
   const forwardedProto = req.headers['x-forwarded-proto'];
@@ -64,5 +65,23 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
 };
 
 export const me = async (req: Request, res: Response): Promise<void> => {
-  res.status(StatusCodes.OK).json({ user: req.user });
+  if (!req.user) {
+    throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
+  }
+
+  const user = await authService.getMe(req.user.id);
+  res.status(StatusCodes.OK).json({ user });
+};
+
+export const updateMe = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) {
+    throw new HttpError(StatusCodes.UNAUTHORIZED, 'Unauthorized');
+  }
+
+  const user = await authService.updateMe(req.user.id, {
+    displayName: typeof req.body.displayName === 'string' ? req.body.displayName : undefined,
+    avatarUrl: req.file ? `/uploads/${req.file.filename}` : undefined
+  });
+
+  res.status(StatusCodes.OK).json({ user });
 };

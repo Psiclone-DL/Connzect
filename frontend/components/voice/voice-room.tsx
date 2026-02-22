@@ -16,6 +16,8 @@ type SignalPayload = {
 interface VoiceRoomProps {
   channelId: string;
   socket: Socket;
+  preferredInputDeviceId?: string;
+  preferredOutputDeviceId?: string;
   onParticipantsChange?: (participants: VoiceParticipant[]) => void;
 }
 
@@ -23,7 +25,13 @@ const rtcConfig: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
 
-export const VoiceRoom = ({ channelId, socket, onParticipantsChange }: VoiceRoomProps) => {
+export const VoiceRoom = ({
+  channelId,
+  socket,
+  preferredInputDeviceId,
+  preferredOutputDeviceId,
+  onParticipantsChange
+}: VoiceRoomProps) => {
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -134,7 +142,19 @@ export const VoiceRoom = ({ channelId, socket, onParticipantsChange }: VoiceRoom
 
     const initialize = async () => {
       try {
-        localStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const audioConstraints = preferredInputDeviceId ? { deviceId: { exact: preferredInputDeviceId } } : true;
+        try {
+          localStreamRef.current = await navigator.mediaDevices.getUserMedia({
+            audio: audioConstraints,
+            video: false
+          });
+        } catch (preferredDeviceError) {
+          if (!preferredInputDeviceId) {
+            throw preferredDeviceError;
+          }
+
+          localStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        }
         socket.emit('voice:join', { channelId });
       } catch {
         setError('Microphone access is required for voice channels.');
@@ -160,7 +180,7 @@ export const VoiceRoom = ({ channelId, socket, onParticipantsChange }: VoiceRoom
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     };
-  }, [channelId, onParticipantsChange, socket]);
+  }, [channelId, onParticipantsChange, preferredInputDeviceId, socket]);
 
   return (
     <div className="space-y-4">
@@ -192,14 +212,14 @@ export const VoiceRoom = ({ channelId, socket, onParticipantsChange }: VoiceRoom
 
       <div className="space-y-2">
         {remoteStreams.map((entry) => (
-          <RemoteAudio key={entry.socketId} stream={entry.stream} />
+          <RemoteAudio key={entry.socketId} stream={entry.stream} preferredOutputDeviceId={preferredOutputDeviceId} />
         ))}
       </div>
     </div>
   );
 };
 
-const RemoteAudio = ({ stream }: { stream: MediaStream }) => {
+const RemoteAudio = ({ stream, preferredOutputDeviceId }: { stream: MediaStream; preferredOutputDeviceId?: string }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -207,6 +227,14 @@ const RemoteAudio = ({ stream }: { stream: MediaStream }) => {
       audioRef.current.srcObject = stream;
     }
   }, [stream]);
+
+  useEffect(() => {
+    const element = audioRef.current as (HTMLAudioElement & { setSinkId?: (sinkId: string) => Promise<void> }) | null;
+    if (!element || !preferredOutputDeviceId) return;
+    if (typeof element.setSinkId !== 'function') return;
+
+    element.setSinkId(preferredOutputDeviceId).catch(() => undefined);
+  }, [preferredOutputDeviceId]);
 
   return <audio ref={audioRef} autoPlay playsInline />;
 };

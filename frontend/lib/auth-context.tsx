@@ -17,6 +17,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (displayName: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (nextUser: User) => void;
   authRequest: <T>(path: string, init?: RequestInit) => Promise<T>;
 };
 
@@ -90,6 +91,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   }, []);
 
+  const updateUser = useCallback((nextUser: User) => {
+    setUser(nextUser);
+  }, []);
+
   const authRequest = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<T> => {
       const makeRequest = async (tokenOverride?: string): Promise<T> => {
@@ -133,9 +138,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       login,
       register,
       logout,
+      updateUser,
       authRequest
     }),
-    [accessToken, authRequest, loading, login, logout, register, user]
+    [accessToken, authRequest, loading, login, logout, register, updateUser, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

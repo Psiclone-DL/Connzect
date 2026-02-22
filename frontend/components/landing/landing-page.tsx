@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { CreateServerForm } from '@/components/forms/create-server-form';
@@ -20,6 +20,7 @@ import type {
   Message,
   Role,
   ServerDetails,
+  User,
   VideoQuality,
   VoiceParticipant
 } from '@/types';
@@ -81,6 +82,12 @@ const parsePermissionValue = (value?: string): bigint => {
 const compareBigIntDesc = (left: bigint, right: bigint): number => {
   if (left === right) return 0;
   return left > right ? -1 : 1;
+};
+
+const toAudioLabel = (device: MediaDeviceInfo, fallbackPrefix: 'Microphone' | 'Speaker', index: number): string => {
+  const trimmed = device.label.trim();
+  if (trimmed) return trimmed;
+  return `${fallbackPrefix} ${index + 1}`;
 };
 
 const ROLE_PERMISSION_FLAGS = {
@@ -214,9 +221,14 @@ type DragOverTarget =
   | { kind: 'channel'; id: string }
   | { kind: 'uncategorized' };
 
+type AudioDeviceOption = {
+  id: string;
+  label: string;
+};
+
 export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const router = useRouter();
-  const { user, loading, logout, authRequest, accessToken } = useAuth();
+  const { user, loading, logout, authRequest, accessToken, updateUser } = useAuth();
   const socket = useSocket(accessToken);
 
   const [servers, setServers] = useState<ConnzectServer[]>([]);
@@ -234,6 +246,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [isOutputMuted, setIsOutputMuted] = useState(false);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState(false);
+  const [voiceSettingsError, setVoiceSettingsError] = useState<string | null>(null);
+  const [voiceSettingsSuccess, setVoiceSettingsSuccess] = useState<string | null>(null);
+  const [isSavingProfilePhoto, setIsSavingProfilePhoto] = useState(false);
+  const [audioInputDevices, setAudioInputDevices] = useState<AudioDeviceOption[]>([]);
+  const [audioOutputDevices, setAudioOutputDevices] = useState<AudioDeviceOption[]>([]);
+  const [selectedAudioInputId, setSelectedAudioInputId] = useState('');
+  const [selectedAudioOutputId, setSelectedAudioOutputId] = useState('');
 
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -278,6 +297,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const closeTimerRef = useRef<number | null>(null);
   const openTimerRef = useRef<number | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const voiceSettingsRef = useRef<HTMLDivElement | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const lastDragEndedAtRef = useRef(0);
   const activeChannel = useMemo(
     () => channels.find((channel) => channel.id === activeChannelId) ?? null,
@@ -317,6 +338,39 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     () => (user?.id ? `${SERVER_ORDER_STORAGE_PREFIX}${user.id}` : null),
     [user?.id]
   );
+  const audioInputStorageKey = useMemo(() => (user?.id ? `connzect:audio-input:${user.id}` : null), [user?.id]);
+  const audioOutputStorageKey = useMemo(() => (user?.id ? `connzect:audio-output:${user.id}` : null), [user?.id]);
+
+  const loadAudioDevices = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
+      setAudioInputDevices([]);
+      setAudioOutputDevices([]);
+      return;
+    }
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices
+        .filter((device) => device.kind === 'audioinput')
+        .map((device, index) => ({
+          id: device.deviceId,
+          label: toAudioLabel(device, 'Microphone', index)
+        }));
+      const outputs = devices
+        .filter((device) => device.kind === 'audiooutput')
+        .map((device, index) => ({
+          id: device.deviceId,
+          label: toAudioLabel(device, 'Speaker', index)
+        }));
+
+      setAudioInputDevices(inputs);
+      setAudioOutputDevices(outputs);
+      setSelectedAudioInputId((previous) => (inputs.some((entry) => entry.id === previous) ? previous : ''));
+      setSelectedAudioOutputId((previous) => (outputs.some((entry) => entry.id === previous) ? previous : ''));
+    } catch (nextError) {
+      setVoiceSettingsError(nextError instanceof Error ? nextError.message : 'Failed to load audio devices');
+    }
+  }, []);
 
   const applyStoredServerOrder = useCallback(
     (input: ConnzectServer[]): ConnzectServer[] => {
@@ -424,6 +478,101 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setTabletSidebarCollapsed(false);
     }
   }, [isTabletViewport]);
+
+  useEffect(() => {
+    if (!audioInputStorageKey || typeof window === 'undefined') {
+      setSelectedAudioInputId('');
+      return;
+    }
+
+    try {
+      setSelectedAudioInputId(window.localStorage.getItem(audioInputStorageKey) ?? '');
+    } catch {
+      setSelectedAudioInputId('');
+    }
+  }, [audioInputStorageKey]);
+
+  useEffect(() => {
+    if (!audioOutputStorageKey || typeof window === 'undefined') {
+      setSelectedAudioOutputId('');
+      return;
+    }
+
+    try {
+      setSelectedAudioOutputId(window.localStorage.getItem(audioOutputStorageKey) ?? '');
+    } catch {
+      setSelectedAudioOutputId('');
+    }
+  }, [audioOutputStorageKey]);
+
+  useEffect(() => {
+    if (!audioInputStorageKey || typeof window === 'undefined') return;
+    try {
+      if (selectedAudioInputId) {
+        window.localStorage.setItem(audioInputStorageKey, selectedAudioInputId);
+      } else {
+        window.localStorage.removeItem(audioInputStorageKey);
+      }
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, [audioInputStorageKey, selectedAudioInputId]);
+
+  useEffect(() => {
+    if (!audioOutputStorageKey || typeof window === 'undefined') return;
+    try {
+      if (selectedAudioOutputId) {
+        window.localStorage.setItem(audioOutputStorageKey, selectedAudioOutputId);
+      } else {
+        window.localStorage.removeItem(audioOutputStorageKey);
+      }
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, [audioOutputStorageKey, selectedAudioOutputId]);
+
+  useEffect(() => {
+    if (!isVoiceSettingsOpen) return;
+    setVoiceSettingsError(null);
+    setVoiceSettingsSuccess(null);
+    loadAudioDevices().catch(() => undefined);
+
+    const mediaDevices = typeof navigator === 'undefined' ? null : navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return;
+
+    const handleDeviceChange = () => {
+      loadAudioDevices().catch(() => undefined);
+    };
+
+    mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    return () => {
+      mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    };
+  }, [isVoiceSettingsOpen, loadAudioDevices]);
+
+  useEffect(() => {
+    if (!isVoiceSettingsOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (voiceSettingsRef.current && target && !voiceSettingsRef.current.contains(target)) {
+        setIsVoiceSettingsOpen(false);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsVoiceSettingsOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isVoiceSettingsOpen]);
 
   useEffect(() => {
     if (!joinModalOpen) return;
@@ -1402,6 +1551,41 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     logout().then(() => router.replace('/login'));
   };
 
+  const changeProfilePhoto = async (file: File) => {
+    if (!user || isSavingProfilePhoto) return;
+    if (!file.type.startsWith('image/')) {
+      setVoiceSettingsError('Please select an image file.');
+      return;
+    }
+
+    const payload = new FormData();
+    payload.append('avatar', file);
+
+    setIsSavingProfilePhoto(true);
+    setVoiceSettingsError(null);
+    setVoiceSettingsSuccess(null);
+
+    try {
+      const response = await authRequest<{ user: User }>('/auth/me', {
+        method: 'PATCH',
+        body: payload
+      });
+      updateUser(response.user);
+      setVoiceSettingsSuccess('Profile photo updated.');
+    } catch (nextError) {
+      setVoiceSettingsError(nextError instanceof Error ? nextError.message : 'Failed to update profile photo');
+    } finally {
+      setIsSavingProfilePhoto(false);
+    }
+  };
+
+  const onAvatarFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    void changeProfilePhoto(file);
+    event.target.value = '';
+  };
+
   const disconnectVoice = () => {
     if (!isVoiceConnected) return;
     socket?.emit('voice:leave');
@@ -1917,22 +2101,76 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                       </svg>
                     </button>
 
-                    <button
-                      type="button"
-                      aria-label="Voice settings"
-                      title="Voice settings"
-                      aria-pressed={isVoiceSettingsOpen}
-                      onClick={() => setIsVoiceSettingsOpen((current) => !current)}
-                      className={cn(
-                        'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
-                        isVoiceSettingsOpen ? 'border-emerald-200/40 bg-emerald-300/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
-                      )}
-                    >
-                      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="12" cy="12" r="3" />
-                        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.82l.02.02a2 2 0 0 1-2.82 2.82l-.02-.02A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1V21a2 2 0 1 1-4 0v-.04a1.7 1.7 0 0 0-.4-1 1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.82.34l-.02.02a2 2 0 1 1-2.82-2.82l.02-.02A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1-.4H3a2 2 0 1 1 0-4h.04a1.7 1.7 0 0 0 1-.4 1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.82l-.02-.02a2 2 0 1 1 2.82-2.82l.02.02A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1V3a2 2 0 1 1 4 0v.04a1.7 1.7 0 0 0 .4 1 1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.82-.34l.02-.02a2 2 0 1 1 2.82 2.82l-.02.02A1.7 1.7 0 0 0 19.4 9c.29.3.47.68.6 1 .08.32.1.66.06 1 .04.34.02.68-.06 1-.13.32-.31.7-.6 1Z" />
-                      </svg>
-                    </button>
+                    <div ref={voiceSettingsRef} className="relative">
+                      <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={onAvatarFileChange} />
+                      <button
+                        type="button"
+                        aria-label="Voice settings"
+                        title="Voice settings"
+                        aria-pressed={isVoiceSettingsOpen}
+                        onClick={() => setIsVoiceSettingsOpen((current) => !current)}
+                        className={cn(
+                          'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
+                          isVoiceSettingsOpen ? 'border-emerald-200/40 bg-emerald-300/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                        )}
+                      >
+                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.82l.02.02a2 2 0 0 1-2.82 2.82l-.02-.02A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1V21a2 2 0 1 1-4 0v-.04a1.7 1.7 0 0 0-.4-1 1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.82.34l-.02.02a2 2 0 1 1-2.82-2.82l.02-.02A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1-.4H3a2 2 0 1 1 0-4h.04a1.7 1.7 0 0 0 1-.4 1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.82l-.02-.02a2 2 0 1 1 2.82-2.82l.02.02A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1V3a2 2 0 1 1 4 0v.04a1.7 1.7 0 0 0 .4 1 1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.82-.34l.02-.02a2 2 0 1 1 2.82 2.82l-.02.02A1.7 1.7 0 0 0 19.4 9c.29.3.47.68.6 1 .08.32.1.66.06 1 .04.34.02.68-.06 1-.13.32-.31.7-.6 1Z" />
+                        </svg>
+                      </button>
+
+                      {isVoiceSettingsOpen ? (
+                        <div className="absolute left-0 top-10 z-[72] w-80 rounded-2xl border border-emerald-200/25 bg-slate-950/95 p-3 shadow-[0_20px_60px_-25px_rgba(16,185,129,0.65)] backdrop-blur-md">
+                          <div className="rounded-xl border border-white/10 bg-black/25 p-2.5">
+                            <button
+                              type="button"
+                              onClick={() => avatarInputRef.current?.click()}
+                              disabled={isSavingProfilePhoto}
+                              className="inline-flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left text-xs font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <span>{isSavingProfilePhoto ? 'Updating photo...' : 'Change profile photo'}</span>
+                              <span className="text-[10px] text-emerald-100/80">Upload</span>
+                            </button>
+                          </div>
+
+                          <div className="mt-2.5 rounded-xl border border-white/10 bg-black/25 p-2.5">
+                            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Input microphone</p>
+                            <select
+                              value={selectedAudioInputId}
+                              onChange={(event) => setSelectedAudioInputId(event.target.value)}
+                              className="mt-1.5 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-xs text-slate-100 outline-none transition"
+                            >
+                              <option value="">System default</option>
+                              {audioInputDevices.map((device) => (
+                                <option key={device.id} value={device.id}>
+                                  {device.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="mt-2.5 rounded-xl border border-white/10 bg-black/25 p-2.5">
+                            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Output speaker</p>
+                            <select
+                              value={selectedAudioOutputId}
+                              onChange={(event) => setSelectedAudioOutputId(event.target.value)}
+                              className="mt-1.5 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-xs text-slate-100 outline-none transition"
+                            >
+                              <option value="">System default</option>
+                              {audioOutputDevices.map((device) => (
+                                <option key={device.id} value={device.id}>
+                                  {device.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {voiceSettingsError ? <p className="mt-2 text-xs text-red-300">{voiceSettingsError}</p> : null}
+                          {voiceSettingsSuccess ? <p className="mt-2 text-xs text-emerald-100">{voiceSettingsSuccess}</p> : null}
+                        </div>
+                      ) : null}
+                    </div>
 
                     {canShowVoiceActions ? (
                       <>
@@ -2447,7 +2685,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   <section className="rounded-2xl border border-white/10 bg-black/15 p-4">
                     {connectedVoiceChannelId && socket ? (
                       <div className="sr-only" aria-hidden="true">
-                        <VoiceRoom channelId={connectedVoiceChannelId} socket={socket} onParticipantsChange={setVoiceParticipants} />
+                        <VoiceRoom
+                          channelId={connectedVoiceChannelId}
+                          socket={socket}
+                          preferredInputDeviceId={selectedAudioInputId || undefined}
+                          preferredOutputDeviceId={selectedAudioOutputId || undefined}
+                          onParticipantsChange={setVoiceParticipants}
+                        />
                       </div>
                     ) : null}
                     {activeChannel ? (
