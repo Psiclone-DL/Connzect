@@ -18,19 +18,24 @@ const SPLASH_HEIGHT = 420;
 const SPLASH_TITLE = 'Connzect';
 const STARTUP_STATUS = 'Launching client...';
 const UPDATING_PREFIX = 'Updating Client...';
-const UPDATE_RESTART_ALERT = 'New Update found, Connzect restarts';
+const UPDATE_RESTART_SECONDS = 7;
+const UPDATE_RESTART_ALERT = 'New Update Found, The app is restarting in';
 
 let mainWindow = null;
 let splashWindow = null;
 let installingUpdate = false;
 let reconnectTimer = null;
+let restartCountdownTimer = null;
+let hasDownloadedUpdate = false;
 let splashLoaded = false;
 let startupCompleted = false;
 let showingUpdateProgress = false;
 let splashStatus = {
   title: SPLASH_TITLE,
   message: STARTUP_STATUS,
-  percent: null
+  percent: null,
+  alert: false,
+  showRestartNow: false
 };
 
 const log = (...values) => {
@@ -158,6 +163,13 @@ const buildSplashHtml = () => {
       line-height: 1.45;
       min-height: 44px;
       white-space: pre-wrap;
+      transition: color 120ms ease, font-size 120ms ease, font-weight 120ms ease;
+    }
+    .status.alert {
+      color: #ecfdf5;
+      font-size: 22px;
+      line-height: 1.25;
+      font-weight: 800;
     }
     .progress {
       margin-top: 14px;
@@ -185,6 +197,30 @@ const buildSplashHtml = () => {
       color: rgba(203, 255, 233, 0.88);
       min-height: 16px;
     }
+    .actions {
+      margin-top: 14px;
+      display: flex;
+      justify-content: center;
+      min-height: 44px;
+    }
+    .restart-now {
+      display: none;
+      border: 1px solid rgba(16, 185, 129, 0.85);
+      background: linear-gradient(150deg, rgba(16, 185, 129, 0.92), rgba(5, 150, 105, 0.88));
+      color: #f0fdf4;
+      font-size: 16px;
+      font-weight: 700;
+      padding: 10px 18px;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 14px 26px rgba(6, 95, 70, 0.4);
+    }
+    .restart-now:hover {
+      filter: brightness(1.06);
+    }
+    .restart-now:active {
+      transform: translateY(1px);
+    }
   </style>
 </head>
 <body>
@@ -200,6 +236,9 @@ const buildSplashHtml = () => {
       </div>
       <p id="percent" class="percent"></p>
     </div>
+    <div class="actions">
+      <button id="restart-now" class="restart-now" type="button">Restart now</button>
+    </div>
   </section>
   <script>
     (function () {
@@ -207,6 +246,11 @@ const buildSplashHtml = () => {
       const statusEl = document.getElementById('status');
       const fillEl = document.getElementById('progress-fill');
       const percentEl = document.getElementById('percent');
+      const restartNowEl = document.getElementById('restart-now');
+
+      restartNowEl.addEventListener('click', function () {
+        window.location.href = 'connzect://restart-now';
+      });
 
       window.updateConnzectSplash = function updateConnzectSplash(payload) {
         if (!payload || typeof payload !== 'object') return;
@@ -219,20 +263,94 @@ const buildSplashHtml = () => {
           statusEl.textContent = payload.message;
         }
 
+        statusEl.classList.toggle('alert', Boolean(payload.alert));
+
         if (typeof payload.percent === 'number' && Number.isFinite(payload.percent)) {
           const normalized = Math.max(0, Math.min(100, payload.percent));
           fillEl.style.width = normalized.toFixed(1) + '%';
           percentEl.textContent = normalized.toFixed(1) + '%';
-          return;
+        } else {
+          fillEl.style.width = '0%';
+          percentEl.textContent = '';
         }
 
-        fillEl.style.width = '0%';
-        percentEl.textContent = '';
+        restartNowEl.style.display = payload.showRestartNow ? 'inline-flex' : 'none';
       };
     })();
   </script>
 </body>
 </html>`;
+};
+
+const hideMainWindow = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isVisible()) {
+    mainWindow.hide();
+  }
+};
+
+const clearRestartTimers = () => {
+  if (restartCountdownTimer) {
+    clearInterval(restartCountdownTimer);
+    restartCountdownTimer = null;
+  }
+};
+
+const installDownloadedUpdate = (reason) => {
+  if (installingUpdate) {
+    return;
+  }
+  if (!hasDownloadedUpdate) {
+    return;
+  }
+
+  installingUpdate = true;
+  showingUpdateProgress = true;
+  clearRestartTimers();
+  hideMainWindow();
+
+  log(`Installing downloaded update (${reason})...`);
+  setSplashStatus({
+    message: 'Restarting now to install update...',
+    percent: 100,
+    alert: true,
+    showRestartNow: false
+  }).catch(() => undefined);
+
+  setTimeout(() => {
+    try {
+      // isSilent=true, isForceRunAfter=true
+      autoUpdater.quitAndInstall(true, true);
+    } catch (error) {
+      log('Silent quitAndInstall failed, falling back to app.quit():', error?.message || String(error));
+      app.quit();
+    }
+  }, 160);
+};
+
+const startUpdateRestartCountdown = (seconds = UPDATE_RESTART_SECONDS) => {
+  clearRestartTimers();
+  let secondsLeft = Math.max(1, Math.floor(seconds));
+
+  const render = () =>
+    setSplashStatus({
+      message: `${UPDATE_RESTART_ALERT} ${secondsLeft} seconds`,
+      percent: 100,
+      alert: true,
+      showRestartNow: true
+    }).catch(() => undefined);
+
+  render();
+
+  restartCountdownTimer = setInterval(() => {
+    secondsLeft -= 1;
+    if (secondsLeft <= 0) {
+      clearRestartTimers();
+      installDownloadedUpdate('countdown');
+      return;
+    }
+    render();
+  }, 1000);
 };
 
 const createSplashWindow = () => {
@@ -263,6 +381,15 @@ const createSplashWindow = () => {
     }
   });
 
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('connzect://restart-now')) {
+      return;
+    }
+
+    event.preventDefault();
+    installDownloadedUpdate('manual-button');
+  });
+
   win.on('closed', () => {
     if (splashWindow === win) {
       splashWindow = null;
@@ -287,12 +414,20 @@ const ensureSplashWindow = async () => {
   return win;
 };
 
-const setSplashStatus = async ({ title = SPLASH_TITLE, message = STARTUP_STATUS, percent = null } = {}) => {
+const setSplashStatus = async ({
+  title = SPLASH_TITLE,
+  message = STARTUP_STATUS,
+  percent = null,
+  alert = false,
+  showRestartNow = false
+} = {}) => {
   const normalizedPercent = typeof percent === 'number' && Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
   splashStatus = {
     title,
     message,
-    percent: normalizedPercent
+    percent: normalizedPercent,
+    alert: Boolean(alert),
+    showRestartNow: Boolean(showRestartNow)
   };
 
   const win = await ensureSplashWindow();
@@ -311,6 +446,7 @@ const setSplashStatus = async ({ title = SPLASH_TITLE, message = STARTUP_STATUS,
 };
 
 const closeSplashWindow = () => {
+  clearRestartTimers();
   if (!splashWindow || splashWindow.isDestroyed()) {
     splashWindow = null;
     splashLoaded = false;
@@ -503,31 +639,44 @@ const setupAutoUpdates = () => {
   autoUpdater.on('update-available', (info) => {
     log(`Update available: ${info.version}`);
     showingUpdateProgress = true;
+    hasDownloadedUpdate = false;
+    hideMainWindow();
     setSplashStatus({
-      message: `${UPDATING_PREFIX} ~0% Done`,
-      percent: 0
+      message: 'New Update Found\nDownloading update package...',
+      percent: 0,
+      alert: true,
+      showRestartNow: false
     }).catch(() => undefined);
   });
 
   autoUpdater.on('update-not-available', () => {
     log('No updates available.');
-    if (showingUpdateProgress) {
+    if (showingUpdateProgress && !hasDownloadedUpdate && !installingUpdate) {
       showingUpdateProgress = false;
       closeSplashWindow();
+      if (startupCompleted) {
+        showMainWindow();
+      }
     }
   });
 
   autoUpdater.on('error', (error) => {
     log('Auto-update error:', error?.message || String(error));
-    if (showingUpdateProgress) {
+    if (showingUpdateProgress && !installingUpdate) {
       setSplashStatus({
         message: `Update failed: ${error?.message || 'Unknown error'}`,
-        percent: null
+        percent: null,
+        alert: true,
+        showRestartNow: false
       }).catch(() => undefined);
       setTimeout(() => {
-        if (!showingUpdateProgress) return;
+        if (!showingUpdateProgress || installingUpdate) return;
         showingUpdateProgress = false;
+        hasDownloadedUpdate = false;
         closeSplashWindow();
+        if (startupCompleted) {
+          showMainWindow();
+        }
       }, 2500);
     }
   });
@@ -536,47 +685,27 @@ const setupAutoUpdates = () => {
     const percent = Number(progress.percent || 0).toFixed(1);
     log(`Update download progress: ${percent}%`);
     showingUpdateProgress = true;
+    hideMainWindow();
     setSplashStatus({
-      message: `${UPDATING_PREFIX} ~${percent}% Done`,
-      percent: Number(percent)
+      message: `New Update Found\n${UPDATING_PREFIX} ~${percent}% Done`,
+      percent: Number(percent),
+      alert: true,
+      showRestartNow: false
     }).catch(() => undefined);
   });
 
   autoUpdater.on('update-downloaded', (info) => {
     log(`Update downloaded: ${info.version}`);
     showingUpdateProgress = true;
-    setSplashStatus({
-      message: `${UPDATE_RESTART_ALERT}\n\nUpdating Client... ~100% Done`,
-      percent: 100
-    }).catch(() => undefined);
+    hasDownloadedUpdate = true;
+    hideMainWindow();
 
     if (installingUpdate) {
       log('Update install already in progress. Skipping duplicate trigger.');
       return;
     }
 
-    installingUpdate = true;
-    log('Installing update silently and restarting app...');
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      try {
-        // Prevent visible flicker/crash-like feel while installer takes over.
-        mainWindow.setOpacity(0);
-        mainWindow.minimize();
-      } catch (error) {
-        log('Failed to transition window before update:', error?.message || String(error));
-      }
-    }
-
-    setTimeout(() => {
-      try {
-        // isSilent=true, isForceRunAfter=true
-        autoUpdater.quitAndInstall(true, true);
-      } catch (error) {
-        log('Silent quitAndInstall failed, falling back to app.quit():', error?.message || String(error));
-        app.quit();
-      }
-    }, 1500);
+    startUpdateRestartCountdown(UPDATE_RESTART_SECONDS);
   });
 
   log('Using GitHub Releases auto-update provider.');
