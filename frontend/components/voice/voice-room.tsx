@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
-import type { VoiceParticipant } from '@/types';
+import type { VoiceEventPayload, VoiceParticipant } from '@/types';
 import { resolveAssetUrl } from '@/lib/assets';
 
 type SignalType = 'offer' | 'answer' | 'ice-candidate';
@@ -16,6 +16,8 @@ type SignalPayload = {
 interface VoiceRoomProps {
   channelId: string;
   socket: Socket;
+  isMicMuted?: boolean;
+  isOutputMuted?: boolean;
   preferredInputDeviceId?: string;
   preferredOutputDeviceId?: string;
   onParticipantsChange?: (participants: VoiceParticipant[]) => void;
@@ -28,6 +30,8 @@ const rtcConfig: RTCConfiguration = {
 export const VoiceRoom = ({
   channelId,
   socket,
+  isMicMuted = false,
+  isOutputMuted = false,
   preferredInputDeviceId,
   preferredOutputDeviceId,
   onParticipantsChange
@@ -35,14 +39,71 @@ export const VoiceRoom = ({
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const micMutedRef = useRef(isMicMuted);
+  const outputMutedRef = useRef(isOutputMuted);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  const audioContextRef = useRef<AudioContext | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Array<{ socketId: string; stream: MediaStream }>>([]);
 
   const sortedParticipants = useMemo(
     () => [...participants].sort((a, b) => a.displayName.localeCompare(b.displayName)),
     [participants]
   );
+
+  const playVoiceCue = useCallback((action: VoiceEventPayload['action']) => {
+    if (typeof window === 'undefined') return;
+    const AudioContextCtor =
+      window.AudioContext ||
+      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextCtor();
+    }
+    const context = audioContextRef.current;
+    if (!context) return;
+    if (context.state === 'suspended') {
+      context.resume().catch(() => undefined);
+    }
+
+    const playTone = (frequency: number, startAt: number, duration: number, gainValue = 0.035) => {
+      const oscillator = context.createOscillator();
+      const gainNode = context.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(frequency, startAt);
+      gainNode.gain.setValueAtTime(0.0001, startAt);
+      gainNode.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.008);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+      oscillator.connect(gainNode);
+      gainNode.connect(context.destination);
+      oscillator.start(startAt);
+      oscillator.stop(startAt + duration + 0.01);
+    };
+
+    const now = context.currentTime + 0.01;
+    switch (action) {
+      case 'join':
+        playTone(720, now, 0.08, 0.03);
+        playTone(920, now + 0.09, 0.11, 0.04);
+        break;
+      case 'leave':
+      case 'disconnect':
+        playTone(760, now, 0.08, 0.03);
+        playTone(420, now + 0.09, 0.12, 0.04);
+        break;
+      case 'mic-muted':
+      case 'sound-muted':
+        playTone(360, now, 0.11, 0.045);
+        break;
+      case 'mic-unmuted':
+      case 'sound-unmuted':
+        playTone(620, now, 0.11, 0.04);
+        break;
+      default:
+        break;
+    }
+  }, []);
 
   useEffect(() => {
     const ensurePeer = async (targetSocketId: string): Promise<RTCPeerConnection> => {
@@ -140,6 +201,11 @@ export const VoiceRoom = ({
       setRemoteStreams(Array.from(remoteStreamsRef.current.entries()).map(([socketId, stream]) => ({ socketId, stream })));
     };
 
+    const handleVoiceEvent = (payload: VoiceEventPayload) => {
+      if (!payload || payload.channelId !== channelId) return;
+      playVoiceCue(payload.action);
+    };
+
     const initialize = async () => {
       try {
         const audioConstraints = preferredInputDeviceId ? { deviceId: { exact: preferredInputDeviceId } } : true;
@@ -155,13 +221,21 @@ export const VoiceRoom = ({
 
           localStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         }
-        socket.emit('voice:join', { channelId });
+        localStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = !micMutedRef.current;
+        });
+        socket.emit('voice:join', {
+          channelId,
+          isMicMuted: micMutedRef.current,
+          isOutputMuted: outputMutedRef.current
+        });
       } catch {
         setError('Microphone access is required for voice channels.');
       }
     };
 
     socket.on('voice:participants', handleParticipants);
+    socket.on('voice:event', handleVoiceEvent);
     socket.on('webrtc:signal', handleSignal);
 
     initialize().catch(() => undefined);
@@ -169,6 +243,7 @@ export const VoiceRoom = ({
     return () => {
       socket.emit('voice:leave');
       socket.off('voice:participants', handleParticipants);
+      socket.off('voice:event', handleVoiceEvent);
       socket.off('webrtc:signal', handleSignal);
 
       peersRef.current.forEach((peer) => peer.close());
@@ -180,7 +255,18 @@ export const VoiceRoom = ({
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     };
-  }, [channelId, onParticipantsChange, preferredInputDeviceId, socket]);
+  }, [channelId, onParticipantsChange, playVoiceCue, preferredInputDeviceId, socket]);
+
+  useEffect(() => {
+    micMutedRef.current = isMicMuted;
+    outputMutedRef.current = isOutputMuted;
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !isMicMuted;
+    });
+    if (socket.connected) {
+      socket.emit('voice:state', { isMicMuted, isOutputMuted });
+    }
+  }, [isMicMuted, isOutputMuted, socket]);
 
   return (
     <div className="space-y-4">
@@ -205,6 +291,10 @@ export const VoiceRoom = ({
                 </span>
               )}
               <span className="truncate">{participant.displayName}</span>
+              <span className="ml-auto inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.08em] text-slate-300/80">
+                {participant.isMicMuted ? <span className="rounded border border-red-300/30 bg-red-500/15 px-1">MIC</span> : null}
+                {participant.isOutputMuted ? <span className="rounded border border-amber-200/30 bg-amber-400/15 px-1">SOUND</span> : null}
+              </span>
             </div>
           );
         })}
@@ -212,14 +302,27 @@ export const VoiceRoom = ({
 
       <div className="space-y-2">
         {remoteStreams.map((entry) => (
-          <RemoteAudio key={entry.socketId} stream={entry.stream} preferredOutputDeviceId={preferredOutputDeviceId} />
+          <RemoteAudio
+            key={entry.socketId}
+            stream={entry.stream}
+            preferredOutputDeviceId={preferredOutputDeviceId}
+            isOutputMuted={isOutputMuted}
+          />
         ))}
       </div>
     </div>
   );
 };
 
-const RemoteAudio = ({ stream, preferredOutputDeviceId }: { stream: MediaStream; preferredOutputDeviceId?: string }) => {
+const RemoteAudio = ({
+  stream,
+  preferredOutputDeviceId,
+  isOutputMuted
+}: {
+  stream: MediaStream;
+  preferredOutputDeviceId?: string;
+  isOutputMuted?: boolean;
+}) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -235,6 +338,11 @@ const RemoteAudio = ({ stream, preferredOutputDeviceId }: { stream: MediaStream;
 
     element.setSinkId(preferredOutputDeviceId).catch(() => undefined);
   }, [preferredOutputDeviceId]);
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+    audioRef.current.muted = Boolean(isOutputMuted);
+  }, [isOutputMuted]);
 
   return <audio ref={audioRef} autoPlay playsInline />;
 };

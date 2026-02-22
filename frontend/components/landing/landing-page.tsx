@@ -329,11 +329,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         socketId: `local-${user.id}`,
         userId: user.id,
         displayName: user.displayName,
-        avatarUrl: user.avatarUrl ?? null
+        avatarUrl: user.avatarUrl ?? null,
+        isMicMuted,
+        isOutputMuted
       },
       ...voiceParticipants
     ];
-  }, [isVoiceConnected, user, voiceParticipants]);
+  }, [isMicMuted, isOutputMuted, isVoiceConnected, user, voiceParticipants]);
   const accountAvatarUrl = useMemo(() => resolveAssetUrl(user?.avatarUrl ?? null), [user?.avatarUrl]);
   const accountInitial = useMemo(() => user?.displayName.trim().charAt(0).toUpperCase() || '?', [user?.displayName]);
   const serverOrderStorageKey = useMemo(
@@ -2765,6 +2767,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                         <VoiceRoom
                           channelId={connectedVoiceChannelId}
                           socket={socket}
+                          isMicMuted={isMicMuted}
+                          isOutputMuted={isOutputMuted}
                           preferredInputDeviceId={selectedAudioInputId || undefined}
                           preferredOutputDeviceId={selectedAudioOutputId || undefined}
                           onParticipantsChange={setVoiceParticipants}

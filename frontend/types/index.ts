@@ -106,4 +106,21 @@ export interface VoiceParticipant {
   userId: string;
   displayName: string;
   avatarUrl?: string | null;
+  isMicMuted: boolean;
+  isOutputMuted: boolean;
+}
+
+export type VoiceEventAction =
+  | 'join'
+  | 'leave'
+  | 'disconnect'
+  | 'mic-muted'
+  | 'mic-unmuted'
+  | 'sound-muted'
+  | 'sound-unmuted';
+
+export interface VoiceEventPayload {
+  channelId: string;
+  action: VoiceEventAction;
+  participant: VoiceParticipant;
 }

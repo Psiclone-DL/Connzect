@@ -11,6 +11,8 @@ type AuthenticatedSocket = Socket & {
     displayName: string;
     avatarUrl?: string | null;
     voiceChannelId?: string;
+    isMicMuted?: boolean;
+    isOutputMuted?: boolean;
   };
 };
 
@@ -19,7 +21,18 @@ type VoiceParticipant = {
   userId: string;
   displayName: string;
   avatarUrl?: string | null;
+  isMicMuted: boolean;
+  isOutputMuted: boolean;
 };
+
+type VoiceEventAction =
+  | 'join'
+  | 'leave'
+  | 'disconnect'
+  | 'mic-muted'
+  | 'mic-unmuted'
+  | 'sound-muted'
+  | 'sound-unmuted';
 
 const includeAuthor = {
   author: {
@@ -35,6 +48,28 @@ const voiceParticipants = new Map<string, Map<string, VoiceParticipant>>();
 const broadcastVoiceParticipants = (io: Server, channelId: string): void => {
   const participants = Array.from(voiceParticipants.get(channelId)?.values() ?? []);
   io.to(`voice:${channelId}`).emit('voice:participants', participants);
+};
+
+const toVoiceParticipant = (socket: AuthenticatedSocket): VoiceParticipant => ({
+  socketId: socket.id,
+  userId: socket.data.userId,
+  displayName: socket.data.displayName,
+  avatarUrl: socket.data.avatarUrl,
+  isMicMuted: Boolean(socket.data.isMicMuted),
+  isOutputMuted: Boolean(socket.data.isOutputMuted)
+});
+
+const emitVoiceEvent = (
+  io: Server,
+  channelId: string,
+  action: VoiceEventAction,
+  participant: VoiceParticipant
+): void => {
+  io.to(`voice:${channelId}`).emit('voice:event', {
+    channelId,
+    action,
+    participant
+  });
 };
 
 const ensureChannelMessagingAccess = async (channelId: string, userId: string) => {
@@ -118,6 +153,8 @@ export const setupSocket = (io: Server): void => {
       (socket as AuthenticatedSocket).data.email = user.email;
       (socket as AuthenticatedSocket).data.displayName = user.displayName;
       (socket as AuthenticatedSocket).data.avatarUrl = user.avatarUrl;
+      (socket as AuthenticatedSocket).data.isMicMuted = false;
+      (socket as AuthenticatedSocket).data.isOutputMuted = false;
       next();
     } catch {
       next(new Error('Unauthorized socket'));
@@ -438,7 +475,17 @@ export const setupSocket = (io: Server): void => {
       }
     });
 
-    authedSocket.on('voice:join', async ({ channelId }: { channelId: string }) => {
+    authedSocket.on(
+      'voice:join',
+      async ({
+        channelId,
+        isMicMuted,
+        isOutputMuted
+      }: {
+        channelId: string;
+        isMicMuted?: boolean;
+        isOutputMuted?: boolean;
+      }) => {
       try {
         const { channel, effective } = await ensureChannelMessagingAccess(channelId, authedSocket.data.userId);
 
@@ -462,6 +509,7 @@ export const setupSocket = (io: Server): void => {
 
         if (authedSocket.data.voiceChannelId && authedSocket.data.voiceChannelId !== channelId) {
           const previousChannel = authedSocket.data.voiceChannelId;
+          const previousParticipant = toVoiceParticipant(authedSocket);
           authedSocket.leave(`voice:${previousChannel}`);
           const previousBucket = voiceParticipants.get(previousChannel);
           previousBucket?.delete(authedSocket.id);
@@ -469,33 +517,35 @@ export const setupSocket = (io: Server): void => {
             voiceParticipants.delete(previousChannel);
           }
           broadcastVoiceParticipants(io, previousChannel);
+          emitVoiceEvent(io, previousChannel, 'leave', previousParticipant);
         }
 
+        authedSocket.data.isMicMuted = Boolean(isMicMuted);
+        authedSocket.data.isOutputMuted = Boolean(isOutputMuted);
         authedSocket.data.voiceChannelId = channelId;
         authedSocket.join(`voice:${channelId}`);
 
         const channelParticipants = voiceParticipants.get(channelId) ?? new Map<string, VoiceParticipant>();
-        channelParticipants.set(authedSocket.id, {
-          socketId: authedSocket.id,
-          userId: authedSocket.data.userId,
-          displayName: authedSocket.data.displayName,
-          avatarUrl: authedSocket.data.avatarUrl
-        });
+        const participant = toVoiceParticipant(authedSocket);
+        channelParticipants.set(authedSocket.id, participant);
         voiceParticipants.set(channelId, channelParticipants);
 
         broadcastVoiceParticipants(io, channelId);
+        emitVoiceEvent(io, channelId, 'join', participant);
       } catch (error) {
         authedSocket.emit('error:event', {
           scope: 'voice:join',
           message: error instanceof Error ? error.message : 'Failed to join voice channel'
         });
       }
-    });
+      }
+    );
 
     authedSocket.on('voice:leave', () => {
       const voiceChannelId = authedSocket.data.voiceChannelId;
       if (!voiceChannelId) return;
 
+      const participant = toVoiceParticipant(authedSocket);
       authedSocket.leave(`voice:${voiceChannelId}`);
       const channelParticipants = voiceParticipants.get(voiceChannelId);
       channelParticipants?.delete(authedSocket.id);
@@ -505,6 +555,41 @@ export const setupSocket = (io: Server): void => {
       }
 
       authedSocket.data.voiceChannelId = undefined;
+      broadcastVoiceParticipants(io, voiceChannelId);
+      emitVoiceEvent(io, voiceChannelId, 'leave', participant);
+    });
+
+    authedSocket.on('voice:state', ({ isMicMuted, isOutputMuted }: { isMicMuted?: boolean; isOutputMuted?: boolean }) => {
+      const voiceChannelId = authedSocket.data.voiceChannelId;
+      if (!voiceChannelId) return;
+
+      const channelParticipants = voiceParticipants.get(voiceChannelId);
+      if (!channelParticipants) return;
+
+      const currentParticipant = channelParticipants.get(authedSocket.id);
+      if (!currentParticipant) return;
+
+      const nextMicMuted = Boolean(isMicMuted);
+      const nextOutputMuted = Boolean(isOutputMuted);
+      const micChanged = currentParticipant.isMicMuted !== nextMicMuted;
+      const outputChanged = currentParticipant.isOutputMuted !== nextOutputMuted;
+
+      if (!micChanged && !outputChanged) {
+        return;
+      }
+
+      currentParticipant.isMicMuted = nextMicMuted;
+      currentParticipant.isOutputMuted = nextOutputMuted;
+      authedSocket.data.isMicMuted = nextMicMuted;
+      authedSocket.data.isOutputMuted = nextOutputMuted;
+      channelParticipants.set(authedSocket.id, currentParticipant);
+
+      if (micChanged) {
+        emitVoiceEvent(io, voiceChannelId, nextMicMuted ? 'mic-muted' : 'mic-unmuted', currentParticipant);
+      }
+      if (outputChanged) {
+        emitVoiceEvent(io, voiceChannelId, nextOutputMuted ? 'sound-muted' : 'sound-unmuted', currentParticipant);
+      }
       broadcastVoiceParticipants(io, voiceChannelId);
     });
 
@@ -523,12 +608,14 @@ export const setupSocket = (io: Server): void => {
       const voiceChannelId = authedSocket.data.voiceChannelId;
       if (!voiceChannelId) return;
 
+      const participant = toVoiceParticipant(authedSocket);
       const channelParticipants = voiceParticipants.get(voiceChannelId);
       channelParticipants?.delete(authedSocket.id);
       if (channelParticipants && channelParticipants.size === 0) {
         voiceParticipants.delete(voiceChannelId);
       }
       broadcastVoiceParticipants(io, voiceChannelId);
+      emitVoiceEvent(io, voiceChannelId, 'disconnect', participant);
     });
   });
 };
