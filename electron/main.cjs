@@ -18,6 +18,7 @@ const SPLASH_HEIGHT = 420;
 const SPLASH_TITLE = 'Connzect';
 const STARTUP_STATUS = 'Launching client...';
 const UPDATING_PREFIX = 'Updating Client...';
+const UPDATE_RESTART_ALERT = 'New Update found, Connzect restarts';
 
 let mainWindow = null;
 let splashWindow = null;
@@ -545,7 +546,7 @@ const setupAutoUpdates = () => {
     log(`Update downloaded: ${info.version}`);
     showingUpdateProgress = true;
     setSplashStatus({
-      message: `${UPDATING_PREFIX} ~100% Done\nRestarting client...`,
+      message: `${UPDATE_RESTART_ALERT}\n\nUpdating Client... ~100% Done`,
       percent: 100
     }).catch(() => undefined);
 
@@ -575,7 +576,7 @@ const setupAutoUpdates = () => {
         log('Silent quitAndInstall failed, falling back to app.quit():', error?.message || String(error));
         app.quit();
       }
-    }, 900);
+    }, 1500);
   });
 
   log('Using GitHub Releases auto-update provider.');
