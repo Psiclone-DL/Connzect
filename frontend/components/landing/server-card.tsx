@@ -101,9 +101,9 @@ export const ServerCard = ({
         isClickAnimating ? styles.serverClickPulse : '',
         draggable ? 'cursor-grab active:cursor-grabbing' : '',
         isDragging ? 'opacity-65' : '',
-        dropIndicator ? 'border-emerald-200/65 bg-emerald-300/15' : '',
-        dropIndicator === 'before' ? 'border-t-2 border-t-emerald-200' : '',
-        dropIndicator === 'after' ? 'border-b-2 border-b-emerald-200' : '',
+        dropIndicator ? 'border-emerald-200/70 bg-emerald-300/20' : '',
+        dropIndicator === 'before' ? 'border-t-4 border-t-emerald-200' : '',
+        dropIndicator === 'after' ? 'border-b-4 border-b-emerald-200' : '',
         'group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition',
         collapsed ? 'justify-center px-2' : ''
       )}

@@ -77,66 +77,77 @@ export const Sidebar = ({
 
       <div className={cn(styles.scrollArea, 'min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto pr-1')}>
         {servers.map((server) => (
-          <ServerCard
+          <div
             key={server.id}
-            server={server}
-            collapsed={collapsed}
-            isActive={activeServerId === server.id}
-            onOpen={handleOpen}
-            onContextMenu={onServerContextMenu}
-            draggable={canReorder}
-            isDragging={draggedServerId === server.id}
-            dropIndicator={dragOverServer?.id === server.id ? dragOverServer.position : null}
-            onDragStart={(event) => {
-              if (!canReorder) return;
-              event.dataTransfer.effectAllowed = 'move';
-              event.dataTransfer.setData('text/plain', server.id);
-              setDraggedServerId(server.id);
-              setDragOverServer(null);
-            }}
-            onDragEnd={() => {
-              setDraggedServerId(null);
-              setDragOverServer(null);
-            }}
-            onDragOver={(event) => {
-              if (!canReorder || !draggedServerId) return;
-              event.preventDefault();
-              setDragOverServer({
-                id: server.id,
-                position: resolveDropPosition(event)
-              });
-            }}
-            onDragLeave={(event) => {
-              const nextTarget = event.relatedTarget as Node | null;
-              if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-              setDragOverServer((previous) => (previous?.id === server.id ? null : previous));
-            }}
-            onDrop={(event) => {
-              if (!canReorder || !draggedServerId || !onReorderServers) return;
-              event.preventDefault();
-              event.stopPropagation();
-              const position = resolveDropPosition(event);
-              const nextIds = servers.map((entry) => entry.id).filter((id) => id !== draggedServerId);
-              const targetIndex = nextIds.indexOf(server.id);
-              if (targetIndex < 0) {
+            className={cn(
+              'rounded-xl transition',
+              dragOverServer?.id === server.id ? 'ring-1 ring-emerald-200/55 bg-emerald-300/10' : ''
+            )}
+          >
+            <ServerCard
+              server={server}
+              collapsed={collapsed}
+              isActive={activeServerId === server.id}
+              onOpen={handleOpen}
+              onContextMenu={onServerContextMenu}
+              draggable={canReorder}
+              isDragging={draggedServerId === server.id}
+              dropIndicator={dragOverServer?.id === server.id ? dragOverServer.position : null}
+              onDragStart={(event) => {
+                if (!canReorder) return;
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', server.id);
+                setDraggedServerId(server.id);
+                setDragOverServer(null);
+              }}
+              onDragEnd={() => {
                 setDraggedServerId(null);
                 setDragOverServer(null);
-                return;
-              }
+              }}
+              onDragOver={(event) => {
+                if (!canReorder || !draggedServerId) return;
+                event.preventDefault();
+                event.stopPropagation();
+                setDragOverServer({
+                  id: server.id,
+                  position: resolveDropPosition(event)
+                });
+              }}
+              onDragLeave={(event) => {
+                const nextTarget = event.relatedTarget as Node | null;
+                if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                setDragOverServer((previous) => (previous?.id === server.id ? null : previous));
+              }}
+              onDrop={(event) => {
+                if (!canReorder || !draggedServerId || !onReorderServers) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const position =
+                  dragOverServer?.id === server.id
+                    ? dragOverServer.position
+                    : resolveDropPosition(event);
+                const nextIds = servers.map((entry) => entry.id).filter((id) => id !== draggedServerId);
+                const targetIndex = nextIds.indexOf(server.id);
+                if (targetIndex < 0) {
+                  setDraggedServerId(null);
+                  setDragOverServer(null);
+                  return;
+                }
 
-              const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
-              nextIds.splice(insertIndex, 0, draggedServerId);
+                const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
+                nextIds.splice(insertIndex, 0, draggedServerId);
 
-              const currentIds = servers.map((entry) => entry.id);
-              const changed = nextIds.some((id, index) => id !== currentIds[index]);
-              if (changed) {
-                onReorderServers(nextIds);
-              }
+                const currentIds = servers.map((entry) => entry.id);
+                const changed = nextIds.some((id, index) => id !== currentIds[index]);
+                if (changed) {
+                  onReorderServers(nextIds);
+                }
 
-              setDraggedServerId(null);
-              setDragOverServer(null);
-            }}
-          />
+                setDraggedServerId(null);
+                setDragOverServer(null);
+              }}
+            />
+          </div>
         ))}
 
         {servers.length === 0 ? (
