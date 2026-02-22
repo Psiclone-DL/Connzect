@@ -1,4 +1,4 @@
-import { MouseEvent } from 'react';
+import { DragEvent, MouseEvent, useState } from 'react';
 import type { ConnzectServer } from '@/types';
 import { cn } from '@/lib/utils';
 import { ServerCard } from './server-card';
@@ -13,6 +13,7 @@ interface SidebarProps {
   onJoinServer?: () => void;
   onServerPicked?: () => void;
   onServerContextMenu?: (event: MouseEvent<HTMLButtonElement>, server: ConnzectServer) => void;
+  onReorderServers?: (orderedServerIds: string[]) => void;
 }
 
 export const Sidebar = ({
@@ -23,12 +24,23 @@ export const Sidebar = ({
   onOpenServer,
   onJoinServer,
   onServerPicked,
-  onServerContextMenu
+  onServerContextMenu,
+  onReorderServers
 }: SidebarProps) => {
+  const [draggedServerId, setDraggedServerId] = useState<string | null>(null);
+  const [dragOverServer, setDragOverServer] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
+
   const handleOpen = (serverId: string) => {
     onOpenServer(serverId);
     onServerPicked?.();
   };
+
+  const resolveDropPosition = (event: DragEvent<HTMLButtonElement>): 'before' | 'after' => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientY <= bounds.top + bounds.height / 2 ? 'before' : 'after';
+  };
+
+  const canReorder = servers.length > 1 && Boolean(onReorderServers);
 
   return (
     <aside className={cn(styles.surface, 'flex h-full min-h-0 flex-col rounded-3xl border p-3', className)}>
@@ -72,6 +84,58 @@ export const Sidebar = ({
             isActive={activeServerId === server.id}
             onOpen={handleOpen}
             onContextMenu={onServerContextMenu}
+            draggable={canReorder}
+            isDragging={draggedServerId === server.id}
+            dropIndicator={dragOverServer?.id === server.id ? dragOverServer.position : null}
+            onDragStart={(event) => {
+              if (!canReorder) return;
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', server.id);
+              setDraggedServerId(server.id);
+              setDragOverServer(null);
+            }}
+            onDragEnd={() => {
+              setDraggedServerId(null);
+              setDragOverServer(null);
+            }}
+            onDragOver={(event) => {
+              if (!canReorder || !draggedServerId) return;
+              event.preventDefault();
+              setDragOverServer({
+                id: server.id,
+                position: resolveDropPosition(event)
+              });
+            }}
+            onDragLeave={(event) => {
+              const nextTarget = event.relatedTarget as Node | null;
+              if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+              setDragOverServer((previous) => (previous?.id === server.id ? null : previous));
+            }}
+            onDrop={(event) => {
+              if (!canReorder || !draggedServerId || !onReorderServers) return;
+              event.preventDefault();
+              event.stopPropagation();
+              const position = resolveDropPosition(event);
+              const nextIds = servers.map((entry) => entry.id).filter((id) => id !== draggedServerId);
+              const targetIndex = nextIds.indexOf(server.id);
+              if (targetIndex < 0) {
+                setDraggedServerId(null);
+                setDragOverServer(null);
+                return;
+              }
+
+              const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
+              nextIds.splice(insertIndex, 0, draggedServerId);
+
+              const currentIds = servers.map((entry) => entry.id);
+              const changed = nextIds.some((id, index) => id !== currentIds[index]);
+              if (changed) {
+                onReorderServers(nextIds);
+              }
+
+              setDraggedServerId(null);
+              setDragOverServer(null);
+            }}
           />
         ))}
 

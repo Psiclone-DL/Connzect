@@ -111,6 +111,8 @@ const VOICE_VIDEO_QUALITY_OPTIONS: Array<{ value: VideoQuality; label: string }>
   { value: 'FULL_HD', label: 'Full HD (1080p)' }
 ];
 
+const SERVER_ORDER_STORAGE_PREFIX = 'connzect:server-order:';
+
 type RolePermissionDraft = {
   kickMember: boolean;
   banMember: boolean;
@@ -311,12 +313,67 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   }, [isVoiceConnected, user, voiceParticipants]);
   const accountAvatarUrl = useMemo(() => resolveAssetUrl(user?.avatarUrl ?? null), [user?.avatarUrl]);
   const accountInitial = useMemo(() => user?.displayName.trim().charAt(0).toUpperCase() || '?', [user?.displayName]);
+  const serverOrderStorageKey = useMemo(
+    () => (user?.id ? `${SERVER_ORDER_STORAGE_PREFIX}${user.id}` : null),
+    [user?.id]
+  );
+
+  const applyStoredServerOrder = useCallback(
+    (input: ConnzectServer[]): ConnzectServer[] => {
+      if (!serverOrderStorageKey || typeof window === 'undefined') return input;
+
+      try {
+        const raw = window.localStorage.getItem(serverOrderStorageKey);
+        if (!raw) return input;
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return input;
+
+        const preferredIds = parsed.filter((value): value is string => typeof value === 'string');
+        if (preferredIds.length === 0) return input;
+
+        const pool = new Map(input.map((server) => [server.id, server]));
+        const ordered: ConnzectServer[] = [];
+
+        for (const serverId of preferredIds) {
+          const server = pool.get(serverId);
+          if (!server) continue;
+          ordered.push(server);
+          pool.delete(serverId);
+        }
+
+        for (const server of input) {
+          if (!pool.has(server.id)) continue;
+          ordered.push(server);
+          pool.delete(server.id);
+        }
+
+        return ordered;
+      } catch {
+        return input;
+      }
+    },
+    [serverOrderStorageKey]
+  );
+
+  const persistServerOrder = useCallback(
+    (orderedServers: ConnzectServer[]) => {
+      if (!serverOrderStorageKey || typeof window === 'undefined' || orderedServers.length === 0) return;
+      try {
+        window.localStorage.setItem(serverOrderStorageKey, JSON.stringify(orderedServers.map((server) => server.id)));
+      } catch {
+        // Ignore localStorage failures; ordering still works in-memory.
+      }
+    },
+    [serverOrderStorageKey]
+  );
 
   const refreshServers = useCallback(async () => {
     const data = await authRequest<ConnzectServer[]>('/servers');
-    setServers(data);
-    return data;
-  }, [authRequest]);
+    const ordered = applyStoredServerOrder(data);
+    setServers(ordered);
+    persistServerOrder(ordered);
+    return ordered;
+  }, [applyStoredServerOrder, authRequest, persistServerOrder]);
 
   useEffect(() => {
     if (loading || !user) {
@@ -335,22 +392,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       return;
     }
 
-    let mounted = true;
-
     refreshServers()
-      .then((data) => {
-        if (!mounted) return;
-        setServers(data);
-      })
       .catch((nextError) => {
-        if (!mounted) return;
         setError(nextError instanceof Error ? nextError.message : 'Failed to load servers');
       });
-
-    return () => {
-      mounted = false;
-    };
   }, [loading, refreshServers, user]);
+
+  useEffect(() => {
+    persistServerOrder(servers);
+  }, [persistServerOrder, servers]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -1742,6 +1792,28 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     setJoinModalOpen(true);
   };
 
+  const handleReorderServers = useCallback((orderedServerIds: string[]) => {
+    setServers((previous) => {
+      const byId = new Map(previous.map((server) => [server.id, server]));
+      const next: ConnzectServer[] = [];
+
+      for (const serverId of orderedServerIds) {
+        const server = byId.get(serverId);
+        if (!server) continue;
+        next.push(server);
+        byId.delete(serverId);
+      }
+
+      for (const server of previous) {
+        if (!byId.has(server.id)) continue;
+        next.push(server);
+        byId.delete(server.id);
+      }
+
+      return next;
+    });
+  }, []);
+
   const handleServerCreated = (server: ConnzectServer) => {
     setServers((previous) => {
       if (previous.some((entry) => entry.id === server.id)) {
@@ -1949,6 +2021,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               onOpenServer={openServerWidget}
               onJoinServer={user ? () => openServerModal('join') : undefined}
               onServerContextMenu={openServerContextMenu}
+              onReorderServers={handleReorderServers}
               onServerPicked={() => setMobileSidebarOpen(false)}
               className="h-full"
             />
@@ -1968,6 +2041,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               onOpenServer={openServerWidget}
               onJoinServer={user ? () => openServerModal('join') : undefined}
               onServerContextMenu={openServerContextMenu}
+              onReorderServers={handleReorderServers}
               className="h-[calc(100vh-7.5rem)]"
             />
           </div>

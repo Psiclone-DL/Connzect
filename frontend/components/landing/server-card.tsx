@@ -1,4 +1,4 @@
-import { MouseEvent, useEffect, useRef, useState } from 'react';
+import { DragEvent, MouseEvent, useEffect, useRef, useState } from 'react';
 import type { ConnzectServer } from '@/types';
 import { cn } from '@/lib/utils';
 import { resolveAssetUrl } from '@/lib/assets';
@@ -10,6 +10,14 @@ interface ServerCardProps {
   isActive?: boolean;
   onOpen: (serverId: string) => void;
   onContextMenu?: (event: MouseEvent<HTMLButtonElement>, server: ConnzectServer) => void;
+  draggable?: boolean;
+  isDragging?: boolean;
+  dropIndicator?: 'before' | 'after' | null;
+  onDragStart?: (event: DragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: (event: DragEvent<HTMLButtonElement>) => void;
+  onDragOver?: (event: DragEvent<HTMLButtonElement>) => void;
+  onDragLeave?: (event: DragEvent<HTMLButtonElement>) => void;
+  onDrop?: (event: DragEvent<HTMLButtonElement>) => void;
 }
 
 const getInitials = (name: string) => {
@@ -26,7 +34,21 @@ const getInitials = (name: string) => {
   return initials || trimmed.slice(0, 2).toUpperCase();
 };
 
-export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen, onContextMenu }: ServerCardProps) => {
+export const ServerCard = ({
+  server,
+  collapsed = false,
+  isActive = false,
+  onOpen,
+  onContextMenu,
+  draggable = false,
+  isDragging = false,
+  dropIndicator = null,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop
+}: ServerCardProps) => {
   const initials = getInitials(server.name);
   const iconUrl = resolveAssetUrl(server.iconUrl);
   const [showIcon, setShowIcon] = useState(Boolean(iconUrl));
@@ -66,11 +88,21 @@ export const ServerCard = ({ server, collapsed = false, isActive = false, onOpen
       title={server.name}
       onClick={handleOpen}
       onContextMenu={(event) => onContextMenu?.(event, server)}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       className={cn(
         styles.surface,
         styles.cardLift,
         isActive ? styles.serverActive : '',
         isClickAnimating ? styles.serverClickPulse : '',
+        draggable ? 'cursor-grab active:cursor-grabbing' : '',
+        isDragging ? 'opacity-65' : '',
+        dropIndicator === 'before' ? 'border-t-2 border-t-emerald-200' : '',
+        dropIndicator === 'after' ? 'border-b-2 border-b-emerald-200' : '',
         'group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition',
         collapsed ? 'justify-center px-2' : ''
       )}
