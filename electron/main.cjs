@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -23,10 +23,16 @@ const UPDATING_PREFIX = 'Updating Client...';
 const UPDATE_RESTART_SECONDS = 7;
 const UPDATE_RESTART_ALERT = 'New Update Found, The app is restarting in';
 const APP_VERSION_LABEL = `Version ${app.getVersion()}`;
+const TRAY_TOOLTIP = 'Connzect';
+const TRAY_BALLOON_TITLE = 'Connzect is still running';
+const TRAY_BALLOON_TEXT = 'Connzect was minimized to tray. Click the tray icon to reopen.';
 
 let mainWindow = null;
 let splashWindow = null;
+let appTray = null;
 let installingUpdate = false;
+let isQuitting = false;
+let trayMinimizeHintShown = false;
 let reconnectTimer = null;
 let restartCountdownTimer = null;
 let periodicUpdateCheckTimer = null;
@@ -107,6 +113,36 @@ const resolveSplashLogoSource = () => {
   }
 
   return null;
+};
+
+const resolveTrayIcon = () => {
+  const candidates = [];
+  const customPath = process.env.CONNZECT_TRAY_ICON_PATH;
+  if (customPath) {
+    candidates.push(path.isAbsolute(customPath) ? customPath : path.resolve(process.cwd(), customPath));
+  }
+
+  candidates.push(path.resolve(process.cwd(), 'electron', 'assets', 'tray.ico'));
+  candidates.push(path.resolve(process.cwd(), 'electron', 'assets', 'icon.ico'));
+  candidates.push(path.resolve(process.cwd(), 'build', 'icon.ico'));
+  candidates.push(path.resolve(process.cwd(), 'icon.ico'));
+  candidates.push(process.execPath);
+
+  for (const candidate of candidates) {
+    if (!candidate || !fs.existsSync(candidate)) continue;
+    const icon = nativeImage.createFromPath(candidate);
+    if (icon.isEmpty()) continue;
+    return process.platform === 'win32' ? icon.resize({ width: 16, height: 16 }) : icon;
+  }
+
+  const fallbackSvg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="#065f46"/>
+      <path d="M39.5 22.5a13 13 0 1 0 0 19" stroke="#ecfdf5" stroke-width="6" stroke-linecap="round" fill="none"/>
+    </svg>
+  `;
+  const fallback = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(fallbackSvg).toString('base64')}`);
+  return process.platform === 'win32' ? fallback.resize({ width: 16, height: 16 }) : fallback;
 };
 
 const buildSplashHtml = () => {
@@ -315,6 +351,79 @@ const hideMainWindow = () => {
   }
 };
 
+const showMainWindow = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+};
+
+const restoreMainWindow = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  showMainWindow();
+  mainWindow.focus();
+};
+
+const showTrayMinimizeHint = () => {
+  if (!appTray || trayMinimizeHintShown || process.platform !== 'win32') {
+    return;
+  }
+
+  trayMinimizeHintShown = true;
+  try {
+    appTray.displayBalloon({
+      title: TRAY_BALLOON_TITLE,
+      content: TRAY_BALLOON_TEXT,
+      iconType: 'info'
+    });
+  } catch {
+    // Ignore if balloon notifications are unsupported on this system.
+  }
+};
+
+const ensureTray = () => {
+  if (appTray) {
+    return appTray;
+  }
+
+  try {
+    appTray = new Tray(resolveTrayIcon());
+  } catch (error) {
+    log('Failed to create tray icon:', error?.message || String(error));
+    appTray = null;
+    return null;
+  }
+
+  appTray.setToolTip(TRAY_TOOLTIP);
+  appTray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Open Connzect',
+        click: () => restoreMainWindow()
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ])
+  );
+  appTray.on('click', () => {
+    restoreMainWindow();
+  });
+  appTray.on('double-click', () => {
+    restoreMainWindow();
+  });
+
+  return appTray;
+};
+
 const clearRestartTimers = () => {
   if (restartCountdownTimer) {
     clearInterval(restartCountdownTimer);
@@ -484,13 +593,6 @@ const closeSplashWindow = () => {
   splashLoaded = false;
 };
 
-const showMainWindow = () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (!mainWindow.isVisible()) {
-    mainWindow.show();
-  }
-};
-
 const tryRevealMainWindowAfterStartup = () => {
   if (!startupCompleted || showingUpdateProgress) {
     return;
@@ -594,6 +696,8 @@ const resolveWebUrl = async () => {
 };
 
 const createMainWindow = () => {
+  ensureTray();
+
   const win = new BrowserWindow({
     width: 1480,
     height: 920,
@@ -610,6 +714,20 @@ const createMainWindow = () => {
   });
 
   mainWindow = win;
+
+  win.on('close', (event) => {
+    if (isQuitting || installingUpdate) {
+      return;
+    }
+
+    if (!appTray) {
+      return;
+    }
+
+    event.preventDefault();
+    hideMainWindow();
+    showTrayMinimizeHint();
+  });
 
   win.on('closed', () => {
     if (mainWindow === win) {
@@ -824,6 +942,11 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
+  if (appTray) {
+    appTray.destroy();
+    appTray = null;
+  }
   if (periodicUpdateCheckTimer) {
     clearInterval(periodicUpdateCheckTimer);
     periodicUpdateCheckTimer = null;
