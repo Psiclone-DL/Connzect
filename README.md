@@ -200,7 +200,7 @@ Flow-ul este automat prin GitHub Actions:
    - face patch bump + commit + tag (`vX.Y.Z`)
    - construieste `.exe` si publica release-ul pe GitHub
 
-When users open the app, it checks for updates at startup and every 30 minutes, downloads automatically, then asks for restart.
+When users open the app, it checks for updates at startup and every 30 minutes, downloads automatically in background, and applies on app quit.
 
 ## API Overview
 
