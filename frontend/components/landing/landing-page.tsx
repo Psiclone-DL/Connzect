@@ -245,7 +245,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [channelEditor, setChannelEditor] = useState<ChannelEditorState | null>(null);
   const [isSavingChannelEditor, setIsSavingChannelEditor] = useState(false);
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Record<string, boolean>>({});
-  const [uncategorizedCollapsed, setUncategorizedCollapsed] = useState(false);
   const [draggedChannelId, setDraggedChannelId] = useState<string | null>(null);
   const [dragOverTarget, setDragOverTarget] = useState<DragOverTarget | null>(null);
   const [isReorderingChannels, setIsReorderingChannels] = useState(false);
@@ -276,6 +275,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     () => channels.find((channel) => channel.id === activeChannelId) ?? null,
     [activeChannelId, channels]
   );
+  const draggedChannel = useMemo(
+    () => (draggedChannelId ? channels.find((channel) => channel.id === draggedChannelId) ?? null : null),
+    [channels, draggedChannelId]
+  );
+  const isDraggingCategory = draggedChannel?.type === 'CATEGORY';
   const activeChatChannelId = useMemo(
     () => (activeChannel?.type === 'TEXT' ? activeChannel.id : activeTextChannelId),
     [activeChannel?.id, activeChannel?.type, activeTextChannelId]
@@ -467,7 +471,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setServerMembers([]);
       setServerRoles([]);
       setCollapsedCategoryIds({});
-      setUncategorizedCollapsed(false);
       setActiveChannelId('');
       setActiveTextChannelId('');
       setMessages([]);
@@ -2031,7 +2034,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               onDragOver={(event) => {
                                 if (!canMoveChannels) return;
                                 event.preventDefault();
-                                if (draggedChannelId && channels.find((entry) => entry.id === draggedChannelId)?.type === 'CATEGORY') {
+                                event.stopPropagation();
+                                if (isDraggingCategory) {
                                   setDragOverTarget({
                                     kind: 'category',
                                     id: category.id,
@@ -2046,14 +2050,17 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 const nextTarget = event.relatedTarget as Node | null;
                                 if (nextTarget && event.currentTarget.contains(nextTarget)) return;
                                 setDragOverTarget((previous) =>
-                                  previous?.kind === 'channel' && previous.id === category.id ? null : previous
+                                  (previous?.kind === 'channel' && previous.id === category.id) ||
+                                  (previous?.kind === 'category' && previous.id === category.id)
+                                    ? null
+                                    : previous
                                 );
                               }}
                               onDrop={(event) => {
                                 if (!canMoveChannels) return;
                                 event.preventDefault();
                                 event.stopPropagation();
-                                if (draggedChannelId && channels.find((entry) => entry.id === draggedChannelId)?.type === 'CATEGORY') {
+                                if (isDraggingCategory) {
                                   void dropOnCategory(category.id, resolveCategoryDropPosition(event));
                                   return;
                                 }
@@ -2221,117 +2228,103 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             void dropOnCategory(null, 'after');
                           }}
                         >
-                          <button
-                            type="button"
-                            data-channel-item="true"
-                            onClick={() => setUncategorizedCollapsed((previous) => !previous)}
-                            className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-sm uppercase tracking-[0.12em] transition hover:border-white/20 hover:bg-white/5"
-                          >
-                            <span className="inline-flex items-center gap-2">
-                              <span className="text-emerald-100/85">{uncategorizedCollapsed ? '>' : 'v'}</span>
-                              <span>Channels</span>
-                            </span>
-                          </button>
+                          {groupedChannels.uncategorized.map((channel) => (
+                            <div key={channel.id} className="space-y-1">
+                              <button
+                                type="button"
+                                data-channel-item="true"
+                                draggable={canMoveChannels}
+                                onDragStart={() => handleDragStart(channel.id)}
+                                onDragEnd={handleDragEnd}
+                                onDragOver={(event) => {
+                                  if (!canMoveChannels) return;
+                                  event.preventDefault();
+                                  setDragOverTarget({ kind: 'channel', id: channel.id });
+                                }}
+                                onDragLeave={(event) => {
+                                  if (!canMoveChannels) return;
+                                  const nextTarget = event.relatedTarget as Node | null;
+                                  if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                                  setDragOverTarget((previous) =>
+                                    previous?.kind === 'channel' && previous.id === channel.id ? null : previous
+                                  );
+                                }}
+                                onDrop={(event) => {
+                                  if (!canMoveChannels) return;
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  void dropBeforeChannel(channel.id);
+                                }}
+                                onClick={() => {
+                                  if (shouldIgnoreClickAfterDrag()) return;
+                                  openChannel(channel);
+                                }}
+                                onContextMenu={(event) => openChannelContextMenu(event, channel)}
+                                className={cn(
+                                  'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                                  canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
+                                  draggedChannelId === channel.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
+                                  activeChannelId === channel.id
+                                    ? 'border-emerald-200/45 bg-white/10'
+                                    : 'border-transparent hover:border-white/20 hover:bg-white/5',
+                                  dragOverTarget?.kind === 'channel' && dragOverTarget.id === channel.id
+                                    ? 'border-emerald-200/65 bg-emerald-300/15'
+                                    : ''
+                                )}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  {canMoveChannels ? <span className="text-[10px] text-emerald-100/45">::</span> : null}
+                                  {channel.type === 'VOICE' ? (
+                                    <svg
+                                      aria-hidden="true"
+                                      viewBox="0 0 24 24"
+                                      className="h-4 w-4 text-emerald-100/85"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    >
+                                      <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+                                      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                                      <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+                                    </svg>
+                                  ) : (
+                                    <span className="text-emerald-100/85">#</span>
+                                  )}
+                                  <span>{channel.name}</span>
+                                </span>
+                              </button>
 
-                          {!uncategorizedCollapsed
-                            ? groupedChannels.uncategorized.map((channel) => (
-                                <div key={channel.id} className="space-y-1">
-                                  <button
-                                    type="button"
-                                    data-channel-item="true"
-                                    draggable={canMoveChannels}
-                                    onDragStart={() => handleDragStart(channel.id)}
-                                    onDragEnd={handleDragEnd}
-                                    onDragOver={(event) => {
-                                      if (!canMoveChannels) return;
-                                      event.preventDefault();
-                                      setDragOverTarget({ kind: 'channel', id: channel.id });
-                                    }}
-                                    onDragLeave={(event) => {
-                                      if (!canMoveChannels) return;
-                                      const nextTarget = event.relatedTarget as Node | null;
-                                      if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-                                      setDragOverTarget((previous) =>
-                                        previous?.kind === 'channel' && previous.id === channel.id ? null : previous
-                                      );
-                                    }}
-                                    onDrop={(event) => {
-                                      if (!canMoveChannels) return;
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      void dropBeforeChannel(channel.id);
-                                    }}
-                                    onClick={() => {
-                                      if (shouldIgnoreClickAfterDrag()) return;
-                                      openChannel(channel);
-                                    }}
-                                    onContextMenu={(event) => openChannelContextMenu(event, channel)}
-                                    className={cn(
-                                      'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
-                                      canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
-                                      draggedChannelId === channel.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
-                                      activeChannelId === channel.id
-                                        ? 'border-emerald-200/45 bg-white/10'
-                                        : 'border-transparent hover:border-white/20 hover:bg-white/5',
-                                      dragOverTarget?.kind === 'channel' && dragOverTarget.id === channel.id
-                                        ? 'border-emerald-200/65 bg-emerald-300/15'
-                                        : ''
-                                    )}
-                                  >
-                                    <span className="inline-flex items-center gap-2">
-                                      {canMoveChannels ? <span className="text-[10px] text-emerald-100/45">::</span> : null}
-                                      {channel.type === 'VOICE' ? (
-                                        <svg
-                                          aria-hidden="true"
-                                          viewBox="0 0 24 24"
-                                          className="h-4 w-4 text-emerald-100/85"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeWidth="2"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                        >
-                                          <path d="M11 5 6 9H2v6h4l5 4V5Z" />
-                                          <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-                                          <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
-                                        </svg>
-                                      ) : (
-                                        <span className="text-emerald-100/85">#</span>
-                                      )}
-                                      <span>{channel.name}</span>
-                                    </span>
-                                  </button>
-
-                                  {channel.type === 'VOICE' &&
-                                  connectedVoiceChannelId === channel.id &&
-                                  displayedVoiceParticipants.length > 0 ? (
-                                    <div className="flex items-center gap-1.5 px-2">
-                                      {displayedVoiceParticipants.map((participant) => {
-                                        const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
-                                        return avatarUrl ? (
-                                          // eslint-disable-next-line @next/next/no-img-element
-                                          <img
-                                            key={participant.socketId}
-                                            src={avatarUrl}
-                                            alt={participant.displayName}
-                                            title={participant.displayName}
-                                            className="h-6 w-6 rounded-full border border-white/20 object-cover"
-                                          />
-                                        ) : (
-                                          <span
-                                            key={participant.socketId}
-                                            title={participant.displayName}
-                                            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
-                                          >
-                                            {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
-                                          </span>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : null}
+                              {channel.type === 'VOICE' &&
+                              connectedVoiceChannelId === channel.id &&
+                              displayedVoiceParticipants.length > 0 ? (
+                                <div className="flex items-center gap-1.5 px-2">
+                                  {displayedVoiceParticipants.map((participant) => {
+                                    const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
+                                    return avatarUrl ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        key={participant.socketId}
+                                        src={avatarUrl}
+                                        alt={participant.displayName}
+                                        title={participant.displayName}
+                                        className="h-6 w-6 rounded-full border border-white/20 object-cover"
+                                      />
+                                    ) : (
+                                      <span
+                                        key={participant.socketId}
+                                        title={participant.displayName}
+                                        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
+                                      >
+                                        {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
+                                      </span>
+                                    );
+                                  })}
                                 </div>
-                              ))
-                            : null}
+                              ) : null}
+                            </div>
+                          ))}
                         </section>
                       ) : null}
 
