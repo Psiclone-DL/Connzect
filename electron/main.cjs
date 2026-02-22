@@ -1,6 +1,9 @@
 const { app, BrowserWindow } = require('electron');
+const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const path = require('path');
+const { pathToFileURL } = require('url');
 const { autoUpdater } = require('electron-updater');
 
 const DEFAULT_URLS = ['http://5.75.169.93:3002', 'http://5.75.169.93'];
@@ -10,10 +13,24 @@ const AUTO_UPDATES_ENABLED =
   app.isPackaged && process.platform === 'win32' && process.env.CONNZECT_DISABLE_AUTO_UPDATES !== '1';
 const WEB_ENDPOINT_TIMEOUT_MS = 12_000;
 const RECONNECT_INTERVAL_MS = 10_000;
+const SPLASH_WIDTH = 620;
+const SPLASH_HEIGHT = 420;
+const SPLASH_TITLE = 'Connzect';
+const STARTUP_STATUS = 'Launching client...';
+const UPDATING_PREFIX = 'Updating Client...';
 
 let mainWindow = null;
+let splashWindow = null;
 let installingUpdate = false;
 let reconnectTimer = null;
+let splashLoaded = false;
+let startupCompleted = false;
+let showingUpdateProgress = false;
+let splashStatus = {
+  title: SPLASH_TITLE,
+  message: STARTUP_STATUS,
+  percent: null
+};
 
 const log = (...values) => {
   // eslint-disable-next-line no-console
@@ -44,6 +61,271 @@ const waitForServer = (url, timeoutMs = 60_000) =>
 
     tryConnect();
   });
+
+const resolveSplashLogoSource = () => {
+  const candidates = [];
+  const customPath = process.env.CONNZECT_SPLASH_LOGO_PATH;
+  if (customPath) {
+    candidates.push(path.isAbsolute(customPath) ? customPath : path.resolve(process.cwd(), customPath));
+  }
+
+  candidates.push(path.resolve(process.cwd(), 'electron', 'assets', 'logo.png'));
+
+  if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, 'electron', 'assets', 'logo.png'));
+    candidates.push(path.join(process.resourcesPath, 'app', 'electron', 'assets', 'logo.png'));
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (!fs.existsSync(candidate)) continue;
+    return pathToFileURL(candidate).toString();
+  }
+
+  return null;
+};
+
+const buildSplashHtml = () => {
+  const logoSrc = resolveSplashLogoSource();
+  const logoMarkup = logoSrc
+    ? `<img class="logo-image" src="${logoSrc}" alt="Connzect logo" />`
+    : `<div class="logo-fallback" aria-hidden="true">C</div>`;
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connzect</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 16% -10%, rgba(52, 211, 153, 0.20) 0%, transparent 45%),
+        radial-gradient(circle at 80% 110%, rgba(16, 185, 129, 0.18) 0%, transparent 52%),
+        #05100d;
+      color: #e7fff6;
+      font-family: "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+    }
+    .shell {
+      width: min(580px, 92vw);
+      border: 1px solid rgba(196, 255, 235, 0.26);
+      border-radius: 24px;
+      padding: 28px;
+      background: rgba(7, 20, 16, 0.82);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(8px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .logo-fallback,
+    .logo-image {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      border: 1px solid rgba(196, 255, 235, 0.35);
+      background: linear-gradient(145deg, rgba(16, 185, 129, 0.4), rgba(6, 95, 70, 0.35));
+      object-fit: cover;
+      display: grid;
+      place-items: center;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #effff8;
+    }
+    .title {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .status {
+      margin: 0;
+      color: rgba(226, 255, 246, 0.9);
+      font-size: 15px;
+      line-height: 1.45;
+      min-height: 44px;
+      white-space: pre-wrap;
+    }
+    .progress {
+      margin-top: 14px;
+    }
+    .progress-line {
+      position: relative;
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(196, 255, 235, 0.25);
+      background: rgba(209, 250, 229, 0.12);
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, rgba(74, 222, 128, 0.86), rgba(16, 185, 129, 0.95));
+      transition: width 120ms linear;
+    }
+    .percent {
+      margin-top: 8px;
+      text-align: right;
+      font-size: 12px;
+      color: rgba(203, 255, 233, 0.88);
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+  <section class="shell">
+    <div class="brand">
+      ${logoMarkup}
+      <h1 id="title" class="title">Connzect</h1>
+    </div>
+    <p id="status" class="status">Launching client...</p>
+    <div class="progress">
+      <div class="progress-line">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+      <p id="percent" class="percent"></p>
+    </div>
+  </section>
+  <script>
+    (function () {
+      const titleEl = document.getElementById('title');
+      const statusEl = document.getElementById('status');
+      const fillEl = document.getElementById('progress-fill');
+      const percentEl = document.getElementById('percent');
+
+      window.updateConnzectSplash = function updateConnzectSplash(payload) {
+        if (!payload || typeof payload !== 'object') return;
+
+        if (typeof payload.title === 'string' && payload.title.trim()) {
+          titleEl.textContent = payload.title;
+        }
+
+        if (typeof payload.message === 'string' && payload.message.trim()) {
+          statusEl.textContent = payload.message;
+        }
+
+        if (typeof payload.percent === 'number' && Number.isFinite(payload.percent)) {
+          const normalized = Math.max(0, Math.min(100, payload.percent));
+          fillEl.style.width = normalized.toFixed(1) + '%';
+          percentEl.textContent = normalized.toFixed(1) + '%';
+          return;
+        }
+
+        fillEl.style.width = '0%';
+        percentEl.textContent = '';
+      };
+    })();
+  </script>
+</body>
+</html>`;
+};
+
+const createSplashWindow = () => {
+  const win = new BrowserWindow({
+    width: SPLASH_WIDTH,
+    height: SPLASH_HEIGHT,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    frame: false,
+    transparent: false,
+    show: false,
+    center: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    backgroundColor: '#06130f',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) {
+      win.show();
+    }
+  });
+
+  win.on('closed', () => {
+    if (splashWindow === win) {
+      splashWindow = null;
+      splashLoaded = false;
+    }
+  });
+
+  splashWindow = win;
+  return win;
+};
+
+const ensureSplashWindow = async () => {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    return splashWindow;
+  }
+
+  const win = createSplashWindow();
+  const html = buildSplashHtml();
+  const dataUrl = `data:text/html;charset=UTF-8,${encodeURIComponent(html)}`;
+  await win.loadURL(dataUrl);
+  splashLoaded = true;
+  return win;
+};
+
+const setSplashStatus = async ({ title = SPLASH_TITLE, message = STARTUP_STATUS, percent = null } = {}) => {
+  const normalizedPercent = typeof percent === 'number' && Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+  splashStatus = {
+    title,
+    message,
+    percent: normalizedPercent
+  };
+
+  const win = await ensureSplashWindow();
+  if (!win || win.isDestroyed()) return;
+  if (!win.isVisible()) {
+    win.show();
+  }
+  if (!splashLoaded || win.webContents.isLoadingMainFrame()) {
+    return;
+  }
+
+  const payload = JSON.stringify(splashStatus);
+  await win.webContents
+    .executeJavaScript(`window.updateConnzectSplash(${payload});`, true)
+    .catch(() => undefined);
+};
+
+const closeSplashWindow = () => {
+  if (!splashWindow || splashWindow.isDestroyed()) {
+    splashWindow = null;
+    splashLoaded = false;
+    return;
+  }
+  splashWindow.close();
+  splashWindow = null;
+  splashLoaded = false;
+};
+
+const showMainWindow = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+};
 
 const renderConnectingScreen = async (message = 'Connecting to Connzect service...') => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -121,6 +403,7 @@ const createMainWindow = () => {
     height: 920,
     minWidth: 1100,
     minHeight: 720,
+    show: false,
     backgroundColor: '#0f1716',
     autoHideMenuBar: true,
     webPreferences: {
@@ -165,8 +448,15 @@ const loadWebApp = async () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
   try {
+    if (!startupCompleted) {
+      await setSplashStatus({ message: 'Connecting to Connzect services...' });
+    }
+
     const webUrl = await resolveWebUrl();
     if (mainWindow.webContents.getURL() !== webUrl) {
+      if (!startupCompleted) {
+        await setSplashStatus({ message: 'Opening Connzect workspace...' });
+      }
       await mainWindow.loadURL(webUrl);
     }
 
@@ -174,11 +464,23 @@ const loadWebApp = async () => {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
 
+    showMainWindow();
+
+    if (!showingUpdateProgress) {
+      closeSplashWindow();
+    }
+
+    startupCompleted = true;
     stopReconnectLoop();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Service is unavailable';
     log('Web app unavailable:', message);
     await renderConnectingScreen(`${message}\n\nRetrying automatically every 10 seconds...`);
+    showMainWindow();
+    if (!showingUpdateProgress) {
+      closeSplashWindow();
+    }
+    startupCompleted = true;
     ensureReconnectLoop();
   }
 };
@@ -199,23 +501,53 @@ const setupAutoUpdates = () => {
 
   autoUpdater.on('update-available', (info) => {
     log(`Update available: ${info.version}`);
+    showingUpdateProgress = true;
+    setSplashStatus({
+      message: `${UPDATING_PREFIX} ~0% Done`,
+      percent: 0
+    }).catch(() => undefined);
   });
 
   autoUpdater.on('update-not-available', () => {
     log('No updates available.');
+    if (showingUpdateProgress) {
+      showingUpdateProgress = false;
+      closeSplashWindow();
+    }
   });
 
   autoUpdater.on('error', (error) => {
     log('Auto-update error:', error?.message || String(error));
+    if (showingUpdateProgress) {
+      setSplashStatus({
+        message: `Update failed: ${error?.message || 'Unknown error'}`,
+        percent: null
+      }).catch(() => undefined);
+      setTimeout(() => {
+        if (!showingUpdateProgress) return;
+        showingUpdateProgress = false;
+        closeSplashWindow();
+      }, 2500);
+    }
   });
 
   autoUpdater.on('download-progress', (progress) => {
     const percent = Number(progress.percent || 0).toFixed(1);
     log(`Update download progress: ${percent}%`);
+    showingUpdateProgress = true;
+    setSplashStatus({
+      message: `${UPDATING_PREFIX} ~${percent}% Done`,
+      percent: Number(percent)
+    }).catch(() => undefined);
   });
 
   autoUpdater.on('update-downloaded', (info) => {
     log(`Update downloaded: ${info.version}`);
+    showingUpdateProgress = true;
+    setSplashStatus({
+      message: `${UPDATING_PREFIX} ~100% Done\nRestarting client...`,
+      percent: 100
+    }).catch(() => undefined);
 
     if (installingUpdate) {
       log('Update install already in progress. Skipping duplicate trigger.');
@@ -266,12 +598,17 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   stopReconnectLoop();
+  closeSplashWindow();
 });
 
 app.whenReady().then(async () => {
   try {
+    await setSplashStatus({
+      title: SPLASH_TITLE,
+      message: STARTUP_STATUS,
+      percent: null
+    });
     createMainWindow();
-    await renderConnectingScreen();
     await loadWebApp();
     setupAutoUpdates();
   } catch (error) {
