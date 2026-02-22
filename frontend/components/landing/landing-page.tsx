@@ -486,38 +486,94 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    type DesktopVersionWindow = Window & {
+      __CONNZECT_DESKTOP_VERSION__?: string;
+    };
+
     const normalizeVersion = (value: string): string =>
       value
         .trim()
         .replace(/[^0-9a-zA-Z.+_-]/g, '')
         .slice(0, 32);
 
-    let queryVersion = '';
-    try {
-      queryVersion = normalizeVersion(new URLSearchParams(window.location.search).get('desktopVersion') ?? '');
-    } catch {
-      queryVersion = '';
-    }
+    const readVersionFromSearch = (): string => {
+      try {
+        return normalizeVersion(new URLSearchParams(window.location.search).get('desktopVersion') ?? '');
+      } catch {
+        return '';
+      }
+    };
 
-    let storedVersion = '';
-    try {
-      storedVersion = normalizeVersion(window.localStorage.getItem(DESKTOP_VERSION_STORAGE_KEY) ?? '');
-    } catch {
-      storedVersion = '';
-    }
+    const readVersionFromHash = (): string => {
+      try {
+        const hash = window.location.hash ?? '';
+        const queryIndex = hash.indexOf('?');
+        if (queryIndex < 0) return '';
+        return normalizeVersion(new URLSearchParams(hash.slice(queryIndex + 1)).get('desktopVersion') ?? '');
+      } catch {
+        return '';
+      }
+    };
 
-    const resolvedVersion = queryVersion || storedVersion;
-    if (!resolvedVersion) {
-      setDesktopVersionLabel(null);
-      return;
-    }
+    const readInjectedVersion = (): string => {
+      try {
+        return normalizeVersion(((window as DesktopVersionWindow).__CONNZECT_DESKTOP_VERSION__ ?? '').toString());
+      } catch {
+        return '';
+      }
+    };
 
-    setDesktopVersionLabel(`Version ${resolvedVersion}`);
-    try {
-      window.localStorage.setItem(DESKTOP_VERSION_STORAGE_KEY, resolvedVersion);
-    } catch {
-      // Ignore localStorage failures.
-    }
+    const readStoredVersion = (): string => {
+      try {
+        return normalizeVersion(window.localStorage.getItem(DESKTOP_VERSION_STORAGE_KEY) ?? '');
+      } catch {
+        return '';
+      }
+    };
+
+    const updateDesktopVersion = () => {
+      const resolvedVersion = readVersionFromSearch() || readVersionFromHash() || readInjectedVersion() || readStoredVersion();
+      if (!resolvedVersion) {
+        setDesktopVersionLabel(null);
+        return;
+      }
+
+      setDesktopVersionLabel(`Version ${resolvedVersion}`);
+      try {
+        window.localStorage.setItem(DESKTOP_VERSION_STORAGE_KEY, resolvedVersion);
+      } catch {
+        // Ignore localStorage failures.
+      }
+    };
+
+    const handleDesktopVersionEvent = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (typeof detail === 'string') {
+        const normalized = normalizeVersion(detail);
+        if (normalized) {
+          setDesktopVersionLabel(`Version ${normalized}`);
+          try {
+            window.localStorage.setItem(DESKTOP_VERSION_STORAGE_KEY, normalized);
+          } catch {
+            // Ignore localStorage failures.
+          }
+          return;
+        }
+      }
+
+      updateDesktopVersion();
+    };
+
+    updateDesktopVersion();
+    window.addEventListener('hashchange', updateDesktopVersion);
+    window.addEventListener('popstate', updateDesktopVersion);
+    window.addEventListener('connzect:desktop-version', handleDesktopVersionEvent as EventListener);
+
+    return () => {
+      window.removeEventListener('hashchange', updateDesktopVersion);
+      window.removeEventListener('popstate', updateDesktopVersion);
+      window.removeEventListener('connzect:desktop-version', handleDesktopVersionEvent as EventListener);
+    };
   }, []);
 
   useEffect(() => {

@@ -51,21 +51,40 @@ export const VoiceRoom = ({
     [participants]
   );
 
-  const playVoiceCue = useCallback((action: VoiceEventPayload['action']) => {
-    if (typeof window === 'undefined') return;
+  const ensureAudioContext = useCallback((): AudioContext | null => {
+    if (typeof window === 'undefined') return null;
     const AudioContextCtor =
       window.AudioContext ||
       (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextCtor) return;
+    if (!AudioContextCtor) return null;
 
     if (!audioContextRef.current) {
       audioContextRef.current = new AudioContextCtor();
     }
-    const context = audioContextRef.current;
-    if (!context) return;
-    if (context.state === 'suspended') {
+    return audioContextRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const unlockAudio = () => {
+      const context = ensureAudioContext();
+      if (!context || context.state === 'running') return;
       context.resume().catch(() => undefined);
-    }
+    };
+
+    // Browser autoplay policies require a user gesture before audio playback.
+    unlockAudio();
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio);
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
+  }, [ensureAudioContext]);
+
+  const playVoiceCue = useCallback((action: VoiceEventPayload['action']) => {
+    const context = ensureAudioContext();
+    if (!context) return;
 
     const playTone = (frequency: number, startAt: number, duration: number, gainValue = 0.035) => {
       const oscillator = context.createOscillator();
@@ -81,29 +100,41 @@ export const VoiceRoom = ({
       oscillator.stop(startAt + duration + 0.01);
     };
 
-    const now = context.currentTime + 0.01;
-    switch (action) {
-      case 'join':
-        playTone(720, now, 0.08, 0.03);
-        playTone(920, now + 0.09, 0.11, 0.04);
-        break;
-      case 'leave':
-      case 'disconnect':
-        playTone(760, now, 0.08, 0.03);
-        playTone(420, now + 0.09, 0.12, 0.04);
-        break;
-      case 'mic-muted':
-      case 'sound-muted':
-        playTone(360, now, 0.11, 0.045);
-        break;
-      case 'mic-unmuted':
-      case 'sound-unmuted':
-        playTone(620, now, 0.11, 0.04);
-        break;
-      default:
-        break;
-    }
-  }, []);
+    const run = async () => {
+      if (context.state !== 'running') {
+        try {
+          await context.resume();
+        } catch {
+          return;
+        }
+      }
+
+      const now = context.currentTime + 0.01;
+      switch (action) {
+        case 'join':
+          playTone(720, now, 0.09, 0.05);
+          playTone(940, now + 0.1, 0.11, 0.06);
+          break;
+        case 'leave':
+        case 'disconnect':
+          playTone(760, now, 0.09, 0.05);
+          playTone(420, now + 0.1, 0.12, 0.06);
+          break;
+        case 'mic-muted':
+        case 'sound-muted':
+          playTone(350, now, 0.11, 0.06);
+          break;
+        case 'mic-unmuted':
+        case 'sound-unmuted':
+          playTone(620, now, 0.11, 0.055);
+          break;
+        default:
+          break;
+      }
+    };
+
+    run().catch(() => undefined);
+  }, [ensureAudioContext]);
 
   useEffect(() => {
     const ensurePeer = async (targetSocketId: string): Promise<RTCPeerConnection> => {
@@ -254,6 +285,8 @@ export const VoiceRoom = ({
 
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
+      audioContextRef.current?.close().catch(() => undefined);
+      audioContextRef.current = null;
     };
   }, [channelId, onParticipantsChange, playVoiceCue, preferredInputDeviceId, socket]);
 

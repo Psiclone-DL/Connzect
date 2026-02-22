@@ -89,6 +89,33 @@ const appendDesktopVersionParam = (url) => {
   }
 };
 
+const syncDesktopVersionInRenderer = (win) => {
+  if (!win || win.isDestroyed()) return;
+
+  const safeVersion = String(app.getVersion() ?? '')
+    .trim()
+    .replace(/[^0-9a-zA-Z.+_-]/g, '')
+    .slice(0, 32);
+
+  if (!safeVersion) return;
+  const safeVersionLiteral = JSON.stringify(safeVersion);
+  const script = `
+    (() => {
+      try {
+        const version = ${safeVersionLiteral};
+        if (!version) return;
+        window.__CONNZECT_DESKTOP_VERSION__ = version;
+        try {
+          window.localStorage.setItem('connzect:desktop-version', version);
+        } catch {}
+        window.dispatchEvent(new CustomEvent('connzect:desktop-version', { detail: version }));
+      } catch {}
+    })();
+  `;
+
+  win.webContents.executeJavaScript(script, true).catch(() => undefined);
+};
+
 const resolveSplashLogoSource = () => {
   const candidates = [];
   const customPath = process.env.CONNZECT_SPLASH_LOGO_PATH;
@@ -630,6 +657,9 @@ const createMainWindow = () => {
   });
 
   mainWindow = win;
+  win.webContents.on('did-finish-load', () => {
+    syncDesktopVersionInRenderer(win);
+  });
 
   win.on('close', (event) => {
     if (isQuitting || installingUpdate) {
