@@ -268,6 +268,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const closeTimerRef = useRef<number | null>(null);
   const openTimerRef = useRef<number | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const lastDragEndedAtRef = useRef(0);
   const activeChannel = useMemo(
     () => channels.find((channel) => channel.id === activeChannelId) ?? null,
     [activeChannelId, channels]
@@ -1012,14 +1013,36 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       uncategorized.sort((left, right) => left.position - right.position);
 
       if (source.type === 'CATEGORY') {
-        if (dropTarget.kind !== 'channel') return null;
-        const target = channels.find((channel) => channel.id === dropTarget.channelId);
-        if (!target || target.type !== 'CATEGORY' || target.id === source.id) return null;
-
         const nextCategories = categories.filter((entry) => entry.id !== source.id);
-        const targetIndex = nextCategories.findIndex((entry) => entry.id === target.id);
-        if (targetIndex < 0) return null;
-        nextCategories.splice(targetIndex, 0, source);
+
+        if (dropTarget.kind === 'category') {
+          if (!dropTarget.categoryId) {
+            nextCategories.push(source);
+          } else {
+            if (dropTarget.categoryId === source.id) return null;
+            const targetIndex = nextCategories.findIndex((entry) => entry.id === dropTarget.categoryId);
+            if (targetIndex < 0) return null;
+            nextCategories.splice(targetIndex, 0, source);
+          }
+        } else {
+          const target = channels.find((channel) => channel.id === dropTarget.channelId);
+          if (!target || target.id === source.id) return null;
+
+          if (target.type === 'CATEGORY') {
+            const targetIndex = nextCategories.findIndex((entry) => entry.id === target.id);
+            if (targetIndex < 0) return null;
+            nextCategories.splice(targetIndex, 0, source);
+          } else {
+            const parentCategoryId = target.categoryId ?? null;
+            if (!parentCategoryId) {
+              nextCategories.push(source);
+            } else {
+              const targetIndex = nextCategories.findIndex((entry) => entry.id === parentCategoryId);
+              if (targetIndex < 0) return null;
+              nextCategories.splice(targetIndex, 0, source);
+            }
+          }
+        }
 
         let position = 0;
         const nextChannels: Channel[] = [];
@@ -1131,9 +1154,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   };
 
   const handleDragEnd = () => {
+    lastDragEndedAtRef.current = Date.now();
     setDraggedChannelId(null);
     setDragOverTarget(null);
   };
+
+  const shouldIgnoreClickAfterDrag = () => Date.now() - lastDragEndedAtRef.current < 180;
 
   const dropOnCategory = async (categoryId: string | null) => {
     if (!canMoveChannels || !draggedChannelId) return;
@@ -1943,6 +1969,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
                 <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_280px]">
                   <aside className="rounded-2xl border border-white/10 bg-black/15 p-3" onContextMenu={openChannelListContextMenu}>
+                    {canMoveChannels ? (
+                      <p className="mb-2 rounded-lg border border-emerald-300/20 bg-emerald-300/10 px-2 py-1 text-[10px] uppercase tracking-[0.1em] text-emerald-100/70">
+                        Drag categories and channels to reorder
+                      </p>
+                    ) : null}
                     <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1">
                       {categoryChannels.map((category) => {
                         const categoryCollapsed = Boolean(collapsedCategoryIds[category.id]);
@@ -2002,21 +2033,25 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 event.stopPropagation();
                                 void dropBeforeChannel(category.id);
                               }}
-                              onClick={() =>
+                              onClick={() => {
+                                if (shouldIgnoreClickAfterDrag()) return;
                                 setCollapsedCategoryIds((previous) => ({
                                   ...previous,
                                   [category.id]: !previous[category.id]
-                                }))
-                              }
+                                }));
+                              }}
                               onContextMenu={(event) => openChannelContextMenu(event, category)}
                               className={cn(
                                 'flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-sm uppercase tracking-[0.12em] transition hover:border-white/20 hover:bg-white/5',
+                                canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
+                                draggedChannelId === category.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
                                 dragOverTarget?.kind === 'channel' && dragOverTarget.id === category.id
                                   ? 'border-emerald-200/65 bg-emerald-300/15'
                                   : ''
                               )}
                             >
                               <span className="inline-flex items-center gap-2">
+                                {canMoveChannels ? <span className="text-[10px] text-emerald-100/45">::</span> : null}
                                 <span className="text-emerald-100/85">{categoryCollapsed ? '>' : 'v'}</span>
                                 <span>{category.name}</span>
                               </span>
@@ -2051,10 +2086,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                         event.stopPropagation();
                                         void dropBeforeChannel(channel.id);
                                       }}
-                                      onClick={() => openChannel(channel)}
+                                      onClick={() => {
+                                        if (shouldIgnoreClickAfterDrag()) return;
+                                        openChannel(channel);
+                                      }}
                                       onContextMenu={(event) => openChannelContextMenu(event, channel)}
                                       className={cn(
                                         'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                                        canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
+                                        draggedChannelId === channel.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
                                         activeChannelId === channel.id
                                           ? 'border-emerald-200/45 bg-white/10'
                                           : 'border-transparent hover:border-white/20 hover:bg-white/5',
@@ -2064,6 +2104,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                       )}
                                     >
                                       <span className="inline-flex items-center gap-2">
+                                        {canMoveChannels ? <span className="text-[10px] text-emerald-100/45">::</span> : null}
                                         {channel.type === 'VOICE' ? (
                                           <svg
                                             aria-hidden="true"
@@ -2184,10 +2225,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                       event.stopPropagation();
                                       void dropBeforeChannel(channel.id);
                                     }}
-                                    onClick={() => openChannel(channel)}
+                                    onClick={() => {
+                                      if (shouldIgnoreClickAfterDrag()) return;
+                                      openChannel(channel);
+                                    }}
                                     onContextMenu={(event) => openChannelContextMenu(event, channel)}
                                     className={cn(
                                       'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                                      canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
+                                      draggedChannelId === channel.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
                                       activeChannelId === channel.id
                                         ? 'border-emerald-200/45 bg-white/10'
                                         : 'border-transparent hover:border-white/20 hover:bg-white/5',
@@ -2197,6 +2243,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                     )}
                                   >
                                     <span className="inline-flex items-center gap-2">
+                                      {canMoveChannels ? <span className="text-[10px] text-emerald-100/45">::</span> : null}
                                       {channel.type === 'VOICE' ? (
                                         <svg
                                           aria-hidden="true"
