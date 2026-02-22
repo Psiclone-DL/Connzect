@@ -19,13 +19,12 @@ const SPLASH_WIDTH = 620;
 const SPLASH_HEIGHT = 420;
 const SPLASH_TITLE = 'Connzect';
 const STARTUP_STATUS = 'Launching client...';
-const UPDATING_PREFIX = 'Updating Client...';
-const UPDATE_RESTART_SECONDS = 7;
-const UPDATE_RESTART_ALERT = 'New Update Found, The app is restarting in';
 const APP_VERSION_LABEL = `Version ${app.getVersion()}`;
 const TRAY_TOOLTIP = 'Connzect';
 const TRAY_BALLOON_TITLE = 'Connzect is still running';
 const TRAY_BALLOON_TEXT = 'Connzect was minimized to tray. Click the tray icon to reopen.';
+const UPDATE_READY_BALLOON_TITLE = 'Update ready';
+const UPDATE_READY_BALLOON_TEXT = 'The new version was downloaded and will install when you quit Connzect.';
 
 let mainWindow = null;
 let splashWindow = null;
@@ -33,14 +32,13 @@ let appTray = null;
 let installingUpdate = false;
 let isQuitting = false;
 let trayMinimizeHintShown = false;
+let updateReadyHintShown = false;
 let reconnectTimer = null;
-let restartCountdownTimer = null;
 let periodicUpdateCheckTimer = null;
 let updateCheckInFlight = false;
 let hasDownloadedUpdate = false;
 let splashLoaded = false;
 let startupCompleted = false;
-let showingUpdateProgress = false;
 let waitingInitialUpdateCheck = AUTO_UPDATES_ENABLED;
 let initialUpdateCheckTimeout = null;
 let pendingMainRevealAfterStartup = false;
@@ -48,8 +46,7 @@ let splashStatus = {
   title: SPLASH_TITLE,
   message: STARTUP_STATUS,
   percent: null,
-  alert: false,
-  showRestartNow: false
+  alert: false
 };
 
 const log = (...values) => {
@@ -251,30 +248,6 @@ const buildSplashHtml = () => {
       color: rgba(203, 255, 233, 0.88);
       min-height: 16px;
     }
-    .actions {
-      margin-top: 14px;
-      display: flex;
-      justify-content: center;
-      min-height: 44px;
-    }
-    .restart-now {
-      display: none;
-      border: 1px solid rgba(16, 185, 129, 0.85);
-      background: linear-gradient(150deg, rgba(16, 185, 129, 0.92), rgba(5, 150, 105, 0.88));
-      color: #f0fdf4;
-      font-size: 16px;
-      font-weight: 700;
-      padding: 10px 18px;
-      border-radius: 12px;
-      cursor: pointer;
-      box-shadow: 0 14px 26px rgba(6, 95, 70, 0.4);
-    }
-    .restart-now:hover {
-      filter: brightness(1.06);
-    }
-    .restart-now:active {
-      transform: translateY(1px);
-    }
     .footer {
       margin-top: 10px;
       text-align: right;
@@ -297,9 +270,6 @@ const buildSplashHtml = () => {
       </div>
       <p id="percent" class="percent"></p>
     </div>
-    <div class="actions">
-      <button id="restart-now" class="restart-now" type="button">Restart now</button>
-    </div>
     <p class="footer">${APP_VERSION_LABEL}</p>
   </section>
   <script>
@@ -308,11 +278,6 @@ const buildSplashHtml = () => {
       const statusEl = document.getElementById('status');
       const fillEl = document.getElementById('progress-fill');
       const percentEl = document.getElementById('percent');
-      const restartNowEl = document.getElementById('restart-now');
-
-      restartNowEl.addEventListener('click', function () {
-        window.location.href = 'connzect://restart-now';
-      });
 
       window.updateConnzectSplash = function updateConnzectSplash(payload) {
         if (!payload || typeof payload !== 'object') return;
@@ -336,7 +301,6 @@ const buildSplashHtml = () => {
           percentEl.textContent = '';
         }
 
-        restartNowEl.style.display = payload.showRestartNow ? 'inline-flex' : 'none';
       };
     })();
   </script>
@@ -398,6 +362,22 @@ const ensureTray = () => {
   }
 
   appTray.setToolTip(TRAY_TOOLTIP);
+  appTray.on('click', () => {
+    restoreMainWindow();
+  });
+  appTray.on('double-click', () => {
+    restoreMainWindow();
+  });
+
+  refreshTrayMenu();
+  return appTray;
+};
+
+const refreshTrayMenu = () => {
+  if (!appTray) {
+    return;
+  }
+
   appTray.setContextMenu(
     Menu.buildFromTemplate([
       {
@@ -406,87 +386,35 @@ const ensureTray = () => {
       },
       { type: 'separator' },
       {
-        label: 'Quit',
+        label: hasDownloadedUpdate ? 'Quit and Install Update' : 'Quit',
         click: () => {
+          if (hasDownloadedUpdate) {
+            installingUpdate = true;
+            log('Applying downloaded update on quit.');
+          }
           isQuitting = true;
           app.quit();
         }
       }
     ])
   );
-  appTray.on('click', () => {
-    restoreMainWindow();
-  });
-  appTray.on('double-click', () => {
-    restoreMainWindow();
-  });
-
-  return appTray;
 };
 
-const clearRestartTimers = () => {
-  if (restartCountdownTimer) {
-    clearInterval(restartCountdownTimer);
-    restartCountdownTimer = null;
-  }
-};
-
-const installDownloadedUpdate = (reason) => {
-  if (installingUpdate) {
-    return;
-  }
-  if (!hasDownloadedUpdate) {
+const showUpdateReadyHint = () => {
+  if (!appTray || updateReadyHintShown || process.platform !== 'win32') {
     return;
   }
 
-  markInitialUpdateCheckSettled();
-  installingUpdate = true;
-  showingUpdateProgress = true;
-  clearRestartTimers();
-  hideMainWindow();
-
-  log(`Installing downloaded update (${reason})...`);
-  setSplashStatus({
-    message: 'Restarting now to install update...',
-    percent: 100,
-    alert: true,
-    showRestartNow: false
-  }).catch(() => undefined);
-
-  setTimeout(() => {
-    try {
-      // isSilent=true, isForceRunAfter=true
-      autoUpdater.quitAndInstall(true, true);
-    } catch (error) {
-      log('Silent quitAndInstall failed, falling back to app.quit():', error?.message || String(error));
-      app.quit();
-    }
-  }, 160);
-};
-
-const startUpdateRestartCountdown = (seconds = UPDATE_RESTART_SECONDS) => {
-  clearRestartTimers();
-  let secondsLeft = Math.max(1, Math.floor(seconds));
-
-  const render = () =>
-    setSplashStatus({
-      message: `${UPDATE_RESTART_ALERT} ${secondsLeft} seconds`,
-      percent: 100,
-      alert: true,
-      showRestartNow: true
-    }).catch(() => undefined);
-
-  render();
-
-  restartCountdownTimer = setInterval(() => {
-    secondsLeft -= 1;
-    if (secondsLeft <= 0) {
-      clearRestartTimers();
-      installDownloadedUpdate('countdown');
-      return;
-    }
-    render();
-  }, 1000);
+  updateReadyHintShown = true;
+  try {
+    appTray.displayBalloon({
+      title: UPDATE_READY_BALLOON_TITLE,
+      content: UPDATE_READY_BALLOON_TEXT,
+      iconType: 'info'
+    });
+  } catch {
+    // Ignore if balloon notifications are unsupported on this system.
+  }
 };
 
 const createSplashWindow = () => {
@@ -517,15 +445,6 @@ const createSplashWindow = () => {
     }
   });
 
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('connzect://restart-now')) {
-      return;
-    }
-
-    event.preventDefault();
-    installDownloadedUpdate('manual-button');
-  });
-
   win.on('closed', () => {
     if (splashWindow === win) {
       splashWindow = null;
@@ -554,16 +473,14 @@ const setSplashStatus = async ({
   title = SPLASH_TITLE,
   message = STARTUP_STATUS,
   percent = null,
-  alert = false,
-  showRestartNow = false
+  alert = false
 } = {}) => {
   const normalizedPercent = typeof percent === 'number' && Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
   splashStatus = {
     title,
     message,
     percent: normalizedPercent,
-    alert: Boolean(alert),
-    showRestartNow: Boolean(showRestartNow)
+    alert: Boolean(alert)
   };
 
   const win = await ensureSplashWindow();
@@ -582,7 +499,6 @@ const setSplashStatus = async ({
 };
 
 const closeSplashWindow = () => {
-  clearRestartTimers();
   if (!splashWindow || splashWindow.isDestroyed()) {
     splashWindow = null;
     splashLoaded = false;
@@ -594,7 +510,7 @@ const closeSplashWindow = () => {
 };
 
 const tryRevealMainWindowAfterStartup = () => {
-  if (!startupCompleted || showingUpdateProgress) {
+  if (!startupCompleted) {
     return;
   }
 
@@ -620,7 +536,7 @@ const markInitialUpdateCheckSettled = () => {
     initialUpdateCheckTimeout = null;
   }
 
-  if (pendingMainRevealAfterStartup && !showingUpdateProgress) {
+  if (pendingMainRevealAfterStartup) {
     tryRevealMainWindowAfterStartup();
   }
 };
@@ -801,17 +717,16 @@ const setupAutoUpdates = () => {
   }
 
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.autoRunAppAfterInstall = true;
 
   autoUpdater.on('checking-for-update', () => {
     log('Checking for updates...');
-    if (!showingUpdateProgress) {
+    if (!startupCompleted) {
       setSplashStatus({
         message: 'Checking for updates...',
         percent: null,
-        alert: false,
-        showRestartNow: false
+        alert: false
       }).catch(() => undefined);
     }
   });
@@ -819,77 +734,61 @@ const setupAutoUpdates = () => {
   autoUpdater.on('update-available', (info) => {
     log(`Update available: ${info.version}`);
     markInitialUpdateCheckSettled();
-    showingUpdateProgress = true;
     hasDownloadedUpdate = false;
-    hideMainWindow();
-    setSplashStatus({
-      message: 'New Update Found\nDownloading update package...',
-      percent: 0,
-      alert: true,
-      showRestartNow: false
-    }).catch(() => undefined);
+    updateReadyHintShown = false;
+    refreshTrayMenu();
+    if (!startupCompleted) {
+      setSplashStatus({
+        message: 'New update found. Downloading in background...',
+        percent: 0,
+        alert: false
+      }).catch(() => undefined);
+    }
   });
 
   autoUpdater.on('update-not-available', () => {
     log('No updates available.');
     markInitialUpdateCheckSettled();
-    if (showingUpdateProgress && !hasDownloadedUpdate && !installingUpdate) {
-      showingUpdateProgress = false;
-      closeSplashWindow();
-      if (startupCompleted) {
-        showMainWindow();
-      }
-    }
   });
 
   autoUpdater.on('error', (error) => {
     log('Auto-update error:', error?.message || String(error));
     markInitialUpdateCheckSettled();
-    if (showingUpdateProgress && !installingUpdate) {
+    if (!startupCompleted) {
       setSplashStatus({
         message: `Update failed: ${error?.message || 'Unknown error'}`,
         percent: null,
-        alert: true,
-        showRestartNow: false
+        alert: true
       }).catch(() => undefined);
-      setTimeout(() => {
-        if (!showingUpdateProgress || installingUpdate) return;
-        showingUpdateProgress = false;
-        hasDownloadedUpdate = false;
-        closeSplashWindow();
-        if (startupCompleted) {
-          showMainWindow();
-        }
-      }, 2500);
     }
   });
 
   autoUpdater.on('download-progress', (progress) => {
     const percent = Number(progress.percent || 0).toFixed(1);
     log(`Update download progress: ${percent}%`);
-    showingUpdateProgress = true;
-    hideMainWindow();
-    setSplashStatus({
-      message: `New Update Found\n${UPDATING_PREFIX} ~${percent}% Done`,
-      percent: Number(percent),
-      alert: true,
-      showRestartNow: false
-    }).catch(() => undefined);
+    if (!startupCompleted) {
+      setSplashStatus({
+        message: `Downloading update... ${percent}%`,
+        percent: Number(percent),
+        alert: false
+      }).catch(() => undefined);
+    }
   });
 
   autoUpdater.on('update-downloaded', (info) => {
     log(`Update downloaded: ${info.version}`);
     markInitialUpdateCheckSettled();
-    showingUpdateProgress = true;
     hasDownloadedUpdate = true;
-    hideMainWindow();
-
-    if (installingUpdate) {
-      log('Update install already in progress. Skipping duplicate trigger.');
-      return;
+    refreshTrayMenu();
+    showUpdateReadyHint();
+    log('Update will install silently when the app is quit.');
+    if (!startupCompleted) {
+      setSplashStatus({
+        message: 'Update downloaded. It will install when you quit Connzect.',
+        percent: 100,
+        alert: false
+      }).catch(() => undefined);
     }
-
-    startUpdateRestartCountdown(UPDATE_RESTART_SECONDS);
   });
 
   log('Using GitHub Releases auto-update provider.');
@@ -900,7 +799,7 @@ const setupAutoUpdates = () => {
       return;
     }
 
-    if (installingUpdate || hasDownloadedUpdate || showingUpdateProgress) {
+    if (installingUpdate || hasDownloadedUpdate) {
       log(`Skipping update check (${reason}); update flow already active.`);
       return;
     }
