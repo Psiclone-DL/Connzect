@@ -20,6 +20,7 @@ const STARTUP_STATUS = 'Launching client...';
 const UPDATING_PREFIX = 'Updating Client...';
 const UPDATE_RESTART_SECONDS = 7;
 const UPDATE_RESTART_ALERT = 'New Update Found, The app is restarting in';
+const APP_VERSION_LABEL = `Version ${app.getVersion()}`;
 
 let mainWindow = null;
 let splashWindow = null;
@@ -221,6 +222,13 @@ const buildSplashHtml = () => {
     .restart-now:active {
       transform: translateY(1px);
     }
+    .footer {
+      margin-top: 10px;
+      text-align: right;
+      font-size: 12px;
+      color: rgba(203, 255, 233, 0.76);
+      letter-spacing: 0.02em;
+    }
   </style>
 </head>
 <body>
@@ -239,6 +247,7 @@ const buildSplashHtml = () => {
     <div class="actions">
       <button id="restart-now" class="restart-now" type="button">Restart now</button>
     </div>
+    <p class="footer">${APP_VERSION_LABEL}</p>
   </section>
   <script>
     (function () {
