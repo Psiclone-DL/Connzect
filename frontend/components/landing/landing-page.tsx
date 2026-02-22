@@ -870,7 +870,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   };
 
   const openChannelListContextMenu = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('[data-channel-item="true"]')) {
+      return;
+    }
     event.preventDefault();
+    event.stopPropagation();
     const { x, y } = resolveContextMenuPosition(event.clientX, event.clientY);
     setContextMenu({ type: 'channelList', x, y });
   };
@@ -1704,12 +1709,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                 </div>
 
                 <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_280px]">
-                  <aside className="rounded-2xl border border-white/10 bg-black/15 p-3">
-                    <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1" onContextMenu={openChannelListContextMenu}>
+                  <aside className="rounded-2xl border border-white/10 bg-black/15 p-3" onContextMenu={openChannelListContextMenu}>
+                    <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1">
                       {categoryChannels.map((category) => (
                         <section key={category.id} className="space-y-1">
                           <button
                             type="button"
+                            data-channel-item="true"
                             onClick={() => openChannel(category)}
                             onContextMenu={(event) => openChannelContextMenu(event, category)}
                             className={cn(
@@ -1729,6 +1735,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                             <div key={channel.id} className="space-y-1 pl-3">
                               <button
                                 type="button"
+                                data-channel-item="true"
                                 onClick={() => openChannel(channel)}
                                 onContextMenu={(event) => openChannelContextMenu(event, channel)}
                                 className={cn(
@@ -1797,6 +1804,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                         <div key={channel.id} className="space-y-1">
                           <button
                             type="button"
+                            data-channel-item="true"
                             onClick={() => openChannel(channel)}
                             onContextMenu={(event) => openChannelContextMenu(event, channel)}
                             className={cn(
