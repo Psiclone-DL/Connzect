@@ -101,13 +101,21 @@ export const ServerCard = ({
         isClickAnimating ? styles.serverClickPulse : '',
         draggable ? 'cursor-grab active:cursor-grabbing' : '',
         isDragging ? 'opacity-65' : '',
-        dropIndicator === 'before' ? 'border-t-2 border-t-emerald-200' : '',
-        dropIndicator === 'after' ? 'border-b-2 border-b-emerald-200' : '',
-        'group flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition',
+        dropIndicator ? 'border-emerald-200/60' : '',
+        'group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border px-3 py-3 text-left transition',
         collapsed ? 'justify-center px-2' : ''
       )}
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-100/20 bg-emerald-300/10 text-xs font-semibold tracking-[0.14em] text-emerald-100">
+      {dropIndicator ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute inset-x-0 z-0 bg-emerald-300/20',
+            dropIndicator === 'before' ? 'top-0 h-1/2' : 'bottom-0 h-1/2'
+          )}
+        />
+      ) : null}
+      <div className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-100/20 bg-emerald-300/10 text-xs font-semibold tracking-[0.14em] text-emerald-100">
         {showIcon && iconUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -120,19 +128,9 @@ export const ServerCard = ({
           initials
         )}
       </div>
-      <div className={cn('min-w-0', collapsed ? 'hidden' : 'block')}>
+      <div className={cn('relative z-10 min-w-0', collapsed ? 'hidden' : 'block')}>
         <p className="truncate text-sm font-medium text-slate-100">{server.name}</p>
       </div>
-      {dropIndicator ? (
-        <span
-          className={cn(
-            'ml-auto inline-flex items-center rounded-md border border-emerald-200/40 bg-emerald-300/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-100',
-            collapsed ? 'hidden' : 'inline-flex'
-          )}
-        >
-          {dropIndicator === 'before' ? 'Sus' : 'Jos'}
-        </span>
-      ) : null}
     </button>
   );
 };
