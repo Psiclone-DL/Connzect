@@ -13,6 +13,7 @@ const AUTO_UPDATES_ENABLED =
   app.isPackaged && process.platform === 'win32' && process.env.CONNZECT_DISABLE_AUTO_UPDATES !== '1';
 const WEB_ENDPOINT_TIMEOUT_MS = 12_000;
 const RECONNECT_INTERVAL_MS = 10_000;
+const INITIAL_UPDATE_CHECK_TIMEOUT_MS = 10_000;
 const SPLASH_WIDTH = 620;
 const SPLASH_HEIGHT = 420;
 const SPLASH_TITLE = 'Connzect';
@@ -31,6 +32,9 @@ let hasDownloadedUpdate = false;
 let splashLoaded = false;
 let startupCompleted = false;
 let showingUpdateProgress = false;
+let waitingInitialUpdateCheck = AUTO_UPDATES_ENABLED;
+let initialUpdateCheckTimeout = null;
+let pendingMainRevealAfterStartup = false;
 let splashStatus = {
   title: SPLASH_TITLE,
   message: STARTUP_STATUS,
@@ -313,6 +317,7 @@ const installDownloadedUpdate = (reason) => {
     return;
   }
 
+  markInitialUpdateCheckSettled();
   installingUpdate = true;
   showingUpdateProgress = true;
   clearRestartTimers();
@@ -473,6 +478,38 @@ const showMainWindow = () => {
   }
 };
 
+const tryRevealMainWindowAfterStartup = () => {
+  if (!startupCompleted || showingUpdateProgress) {
+    return;
+  }
+
+  if (waitingInitialUpdateCheck) {
+    pendingMainRevealAfterStartup = true;
+    return;
+  }
+
+  pendingMainRevealAfterStartup = false;
+  showMainWindow();
+  closeSplashWindow();
+};
+
+const markInitialUpdateCheckSettled = () => {
+  if (!waitingInitialUpdateCheck) {
+    return;
+  }
+
+  waitingInitialUpdateCheck = false;
+
+  if (initialUpdateCheckTimeout) {
+    clearTimeout(initialUpdateCheckTimeout);
+    initialUpdateCheckTimeout = null;
+  }
+
+  if (pendingMainRevealAfterStartup && !showingUpdateProgress) {
+    tryRevealMainWindowAfterStartup();
+  }
+};
+
 const renderConnectingScreen = async (message = 'Connecting to Connzect service...') => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
@@ -610,23 +647,17 @@ const loadWebApp = async () => {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
 
-    showMainWindow();
-
-    if (!showingUpdateProgress) {
-      closeSplashWindow();
-    }
-
     startupCompleted = true;
+    tryRevealMainWindowAfterStartup();
     stopReconnectLoop();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Service is unavailable';
     log('Web app unavailable:', message);
     await renderConnectingScreen(`${message}\n\nRetrying automatically every 10 seconds...`);
-    showMainWindow();
-    if (!showingUpdateProgress) {
-      closeSplashWindow();
-    }
+    markInitialUpdateCheckSettled();
     startupCompleted = true;
+    showMainWindow();
+    closeSplashWindow();
     ensureReconnectLoop();
   }
 };
@@ -643,10 +674,19 @@ const setupAutoUpdates = () => {
 
   autoUpdater.on('checking-for-update', () => {
     log('Checking for updates...');
+    if (!showingUpdateProgress) {
+      setSplashStatus({
+        message: 'Checking for updates...',
+        percent: null,
+        alert: false,
+        showRestartNow: false
+      }).catch(() => undefined);
+    }
   });
 
   autoUpdater.on('update-available', (info) => {
     log(`Update available: ${info.version}`);
+    markInitialUpdateCheckSettled();
     showingUpdateProgress = true;
     hasDownloadedUpdate = false;
     hideMainWindow();
@@ -660,6 +700,7 @@ const setupAutoUpdates = () => {
 
   autoUpdater.on('update-not-available', () => {
     log('No updates available.');
+    markInitialUpdateCheckSettled();
     if (showingUpdateProgress && !hasDownloadedUpdate && !installingUpdate) {
       showingUpdateProgress = false;
       closeSplashWindow();
@@ -671,6 +712,7 @@ const setupAutoUpdates = () => {
 
   autoUpdater.on('error', (error) => {
     log('Auto-update error:', error?.message || String(error));
+    markInitialUpdateCheckSettled();
     if (showingUpdateProgress && !installingUpdate) {
       setSplashStatus({
         message: `Update failed: ${error?.message || 'Unknown error'}`,
@@ -705,6 +747,7 @@ const setupAutoUpdates = () => {
 
   autoUpdater.on('update-downloaded', (info) => {
     log(`Update downloaded: ${info.version}`);
+    markInitialUpdateCheckSettled();
     showingUpdateProgress = true;
     hasDownloadedUpdate = true;
     hideMainWindow();
@@ -722,10 +765,18 @@ const setupAutoUpdates = () => {
   const checkUpdates = () => {
     autoUpdater.checkForUpdates().catch((error) => {
       log('Failed checking updates:', error?.message || String(error));
+      markInitialUpdateCheckSettled();
     });
   };
 
-  setTimeout(checkUpdates, 5000);
+  if (waitingInitialUpdateCheck) {
+    initialUpdateCheckTimeout = setTimeout(() => {
+      log(`Initial update check timed out after ${INITIAL_UPDATE_CHECK_TIMEOUT_MS}ms, continuing startup.`);
+      markInitialUpdateCheckSettled();
+    }, INITIAL_UPDATE_CHECK_TIMEOUT_MS);
+  }
+
+  checkUpdates();
   setInterval(checkUpdates, 30 * 60 * 1000);
 };
 
