@@ -9,7 +9,8 @@ export const Permission = {
   BAN_MEMBER: 1n << 7n,
   KICK_MEMBER: 1n << 8n,
   MANAGE_SERVER: 1n << 9n,
-  MANAGE_PERMISSIONS: 1n << 10n
+  MANAGE_PERMISSIONS: 1n << 10n,
+  MOVE_CHANNELS: 1n << 11n
 } as const;
 
 export const ALL_PERMISSIONS = Object.values(Permission).reduce((acc, bit) => acc | bit, 0n);

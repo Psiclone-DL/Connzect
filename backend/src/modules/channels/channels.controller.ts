@@ -191,6 +191,96 @@ export const updateChannel = async (req: Request, res: Response): Promise<void> 
   res.status(StatusCodes.OK).json(updated);
 };
 
+export const reorderChannels = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new HttpError(401, 'Unauthorized');
+
+  const serverId = routeParam(req.params.serverId);
+  await requireServerPermission(serverId, req.user.id, Permission.MOVE_CHANNELS);
+
+  const items = req.body.items as Array<{ id: string; position: number; categoryId?: string | null }>;
+  const channelIds = items.map((item) => item.id);
+  const uniqueIds = new Set(channelIds);
+  if (uniqueIds.size !== channelIds.length) {
+    throw new HttpError(400, 'Duplicate channel ids are not allowed');
+  }
+
+  const channels = await prisma.channel.findMany({
+    where: {
+      serverId,
+      id: { in: channelIds }
+    }
+  });
+
+  if (channels.length !== channelIds.length) {
+    throw new HttpError(400, 'Some channels were not found in this server');
+  }
+
+  const channelById = new Map(channels.map((channel) => [channel.id, channel]));
+
+  const categoryIds = Array.from(
+    new Set(items.map((item) => item.categoryId).filter((categoryId): categoryId is string => Boolean(categoryId)))
+  );
+
+  let validCategoryIds = new Set<string>();
+  if (categoryIds.length > 0) {
+    const categories = await prisma.channel.findMany({
+      where: {
+        serverId,
+        id: { in: categoryIds },
+        type: ChannelType.CATEGORY
+      },
+      select: { id: true }
+    });
+    validCategoryIds = new Set(categories.map((category) => category.id));
+  }
+
+  for (const item of items) {
+    const current = channelById.get(item.id);
+    if (!current) {
+      throw new HttpError(400, `Channel ${item.id} does not exist`);
+    }
+
+    if (current.type === ChannelType.CATEGORY) {
+      if (item.categoryId !== undefined && item.categoryId !== null) {
+        throw new HttpError(400, 'Category channels cannot belong to another category');
+      }
+      continue;
+    }
+
+    if (item.categoryId === undefined || item.categoryId === null) {
+      continue;
+    }
+
+    if (!validCategoryIds.has(item.categoryId)) {
+      throw new HttpError(400, `Invalid categoryId for channel ${item.id}`);
+    }
+  }
+
+  await prisma.$transaction(
+    items.map((item) =>
+      prisma.channel.update({
+        where: { id: item.id },
+        data: {
+          position: item.position,
+          categoryId:
+            channelById.get(item.id)?.type === ChannelType.CATEGORY
+              ? null
+              : item.categoryId === undefined
+                ? channelById.get(item.id)!.categoryId
+                : item.categoryId
+        }
+      })
+    )
+  );
+
+  const updatedChannels = await prisma.channel.findMany({
+    where: { serverId },
+    orderBy: { position: 'asc' }
+  });
+
+  res.status(StatusCodes.OK).json(updatedChannels);
+};
+
 export const deleteChannel = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 

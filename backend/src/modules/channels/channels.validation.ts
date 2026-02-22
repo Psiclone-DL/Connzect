@@ -32,3 +32,15 @@ export const updateChannelPermissionSchema = z.object({
     denyBits: z.string().regex(/^\d+$/)
   })
 });
+
+export const reorderChannelsSchema = z.object({
+  body: z.object({
+    items: z.array(
+      z.object({
+        id: z.string().uuid(),
+        position: z.number().int().min(0),
+        categoryId: z.string().uuid().nullable().optional()
+      })
+    ).min(1)
+  })
+});

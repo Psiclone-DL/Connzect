@@ -87,19 +87,22 @@ const ROLE_PERMISSION_FLAGS = {
   kickMember: 1n << 8n,
   banMember: 1n << 7n,
   muteChat: 1n << 1n,
-  muteVoice: 1n << 2n
+  muteVoice: 1n << 2n,
+  moveChannels: 1n << 11n
 } as const;
 
 const SERVER_PERMISSION_FLAGS = {
   createChannel: 1n << 3n,
-  manageServer: 1n << 9n
+  manageServer: 1n << 9n,
+  moveChannels: 1n << 11n
 } as const;
 
 const ROLE_PERMISSION_OPTIONS: Array<{ key: keyof RolePermissionDraft; label: string }> = [
   { key: 'kickMember', label: 'Kick' },
   { key: 'banMember', label: 'Ban' },
   { key: 'muteChat', label: 'Mute chat' },
-  { key: 'muteVoice', label: 'Mute voice' }
+  { key: 'muteVoice', label: 'Mute voice' },
+  { key: 'moveChannels', label: 'Move channels' }
 ];
 
 const VOICE_VIDEO_QUALITY_OPTIONS: Array<{ value: VideoQuality; label: string }> = [
@@ -113,6 +116,7 @@ type RolePermissionDraft = {
   banMember: boolean;
   muteChat: boolean;
   muteVoice: boolean;
+  moveChannels: boolean;
 };
 
 type EditableRoleDraft = {
@@ -129,7 +133,8 @@ const toRolePermissionDraft = (permissions?: string): RolePermissionDraft => {
     kickMember: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.kickMember),
     banMember: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.banMember),
     muteChat: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.muteChat),
-    muteVoice: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.muteVoice)
+    muteVoice: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.muteVoice),
+    moveChannels: hasPermissionFlag(bits, ROLE_PERMISSION_FLAGS.moveChannels)
   };
 };
 
@@ -139,6 +144,7 @@ const toPermissionBits = (draft: RolePermissionDraft): string => {
   if (draft.banMember) bits |= ROLE_PERMISSION_FLAGS.banMember;
   if (draft.muteChat) bits |= ROLE_PERMISSION_FLAGS.muteChat;
   if (draft.muteVoice) bits |= ROLE_PERMISSION_FLAGS.muteVoice;
+  if (draft.moveChannels) bits |= ROLE_PERMISSION_FLAGS.moveChannels;
   return bits.toString();
 };
 
@@ -233,6 +239,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [memberAudioSettings, setMemberAudioSettings] = useState<Record<string, { volume: number; muted: boolean }>>({});
   const [channelEditor, setChannelEditor] = useState<ChannelEditorState | null>(null);
   const [isSavingChannelEditor, setIsSavingChannelEditor] = useState(false);
+  const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Record<string, boolean>>({});
+  const [uncategorizedCollapsed, setUncategorizedCollapsed] = useState(false);
+  const [draggedChannelId, setDraggedChannelId] = useState<string | null>(null);
+  const [isReorderingChannels, setIsReorderingChannels] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [serverSettingsTab, setServerSettingsTab] = useState<'general' | 'permissions'>('general');
   const [serverSettingsName, setServerSettingsName] = useState('');
@@ -244,7 +254,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     kickMember: false,
     banMember: false,
     muteChat: false,
-    muteVoice: false
+    muteVoice: false,
+    moveChannels: false
   });
   const [isCreatingRole, setIsCreatingRole] = useState(false);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, EditableRoleDraft>>({});
@@ -448,6 +459,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setChannels([]);
       setServerMembers([]);
       setServerRoles([]);
+      setCollapsedCategoryIds({});
+      setUncategorizedCollapsed(false);
       setActiveChannelId('');
       setActiveTextChannelId('');
       setMessages([]);
@@ -493,6 +506,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     }
 
     const firstText = channels.find((channel) => channel.type === 'TEXT');
+    const firstConversationChannel = firstText ?? channels.find((channel) => channel.type !== 'CATEGORY') ?? channels[0];
     if (!firstText) {
       setActiveTextChannelId('');
     } else if (!channels.some((channel) => channel.id === activeTextChannelId && channel.type === 'TEXT')) {
@@ -500,7 +514,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     }
 
     if (channels.some((channel) => channel.id === activeChannelId)) return;
-    setActiveChannelId((firstText ?? channels[0]).id);
+    setActiveChannelId(firstConversationChannel.id);
   }, [activeChannelId, activeTextChannelId, channels]);
 
   useEffect(() => {
@@ -625,6 +639,11 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (activeServer.ownerId === user.id) return true;
     return hasPermissionFlag(currentMemberPermissions, SERVER_PERMISSION_FLAGS.manageServer);
   }, [activeServer, currentMemberPermissions, user]);
+  const canMoveChannels = useMemo(() => {
+    if (!activeServer || !user) return false;
+    if (activeServer.ownerId === user.id) return true;
+    return hasPermissionFlag(currentMemberPermissions, SERVER_PERMISSION_FLAGS.moveChannels);
+  }, [activeServer, currentMemberPermissions, user]);
   const canOpenServerSettings = useMemo(() => {
     if (!activeServer || !user) return false;
     if (activeServer.ownerId === user.id) return true;
@@ -662,6 +681,18 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       uncategorized
     };
   }, [categoryChannels, channels]);
+
+  useEffect(() => {
+    setCollapsedCategoryIds((previous) => {
+      const next: Record<string, boolean> = {};
+      for (const category of categoryChannels) {
+        if (previous[category.id]) {
+          next[category.id] = true;
+        }
+      }
+      return next;
+    });
+  }, [categoryChannels]);
 
   useEffect(() => {
     if (!activeServer) {
@@ -845,12 +876,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
 
   const openChannel = useCallback(
     (channel: Channel, options?: { forceVoiceJoin?: boolean }) => {
+      if (channel.type === 'CATEGORY') {
+        return;
+      }
       setActiveChannelId(channel.id);
       if (channel.type === 'TEXT') {
         setActiveTextChannelId(channel.id);
-        return;
-      }
-      if (channel.type === 'CATEGORY') {
         return;
       }
 
@@ -920,6 +951,200 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     const loadedChannels = await authRequest<Channel[]>(`/servers/${activeServerId}/channels`);
     setChannels(loadedChannels);
   }, [activeServerId, authRequest]);
+
+  const persistChannelReorder = useCallback(
+    async (updatedChannels: Channel[]) => {
+      if (!activeServerId) return;
+
+      setChannels(updatedChannels);
+      setIsReorderingChannels(true);
+      try {
+        const items = updatedChannels.map((channel, index) => ({
+          id: channel.id,
+          position: index,
+          categoryId: channel.type === 'CATEGORY' ? null : channel.categoryId ?? null
+        }));
+        await authRequest<Channel[]>(`/servers/${activeServerId}/channels/reorder`, {
+          method: 'PATCH',
+          body: JSON.stringify({ items })
+        });
+        setError(null);
+      } catch (nextError) {
+        await refreshActiveChannels();
+        setError(nextError instanceof Error ? nextError.message : 'Failed to reorder channels');
+      } finally {
+        setIsReorderingChannels(false);
+      }
+    },
+    [activeServerId, authRequest, refreshActiveChannels]
+  );
+
+  const buildReorderedChannels = useCallback(
+    (dragId: string, dropTarget: { kind: 'category'; categoryId: string | null } | { kind: 'channel'; channelId: string }) => {
+      const source = channels.find((channel) => channel.id === dragId);
+      if (!source) return null;
+
+      const categories = channels
+        .filter((channel) => channel.type === 'CATEGORY')
+        .sort((left, right) => left.position - right.position);
+      const grouped = new Map<string, Channel[]>();
+      for (const category of categories) {
+        grouped.set(category.id, []);
+      }
+      const uncategorized: Channel[] = [];
+
+      for (const channel of channels) {
+        if (channel.type === 'CATEGORY') continue;
+        const categoryId = channel.categoryId ?? null;
+        if (!categoryId || !grouped.has(categoryId)) {
+          uncategorized.push(channel);
+        } else {
+          grouped.get(categoryId)!.push(channel);
+        }
+      }
+
+      for (const list of grouped.values()) {
+        list.sort((left, right) => left.position - right.position);
+      }
+      uncategorized.sort((left, right) => left.position - right.position);
+
+      if (source.type === 'CATEGORY') {
+        if (dropTarget.kind !== 'channel') return null;
+        const target = channels.find((channel) => channel.id === dropTarget.channelId);
+        if (!target || target.type !== 'CATEGORY' || target.id === source.id) return null;
+
+        const nextCategories = categories.filter((entry) => entry.id !== source.id);
+        const targetIndex = nextCategories.findIndex((entry) => entry.id === target.id);
+        if (targetIndex < 0) return null;
+        nextCategories.splice(targetIndex, 0, source);
+
+        let position = 0;
+        const nextChannels: Channel[] = [];
+        for (const category of nextCategories) {
+          nextChannels.push({
+            ...category,
+            categoryId: null,
+            position: position++
+          });
+          const children = grouped.get(category.id) ?? [];
+          for (const child of children) {
+            nextChannels.push({
+              ...child,
+              categoryId: category.id,
+              position: position++
+            });
+          }
+        }
+        for (const channel of uncategorized) {
+          nextChannels.push({
+            ...channel,
+            categoryId: null,
+            position: position++
+          });
+        }
+        return nextChannels;
+      }
+
+      const removeFromLists = (channelId: string) => {
+        for (const [categoryId, list] of grouped.entries()) {
+          const index = list.findIndex((entry) => entry.id === channelId);
+          if (index >= 0) {
+            list.splice(index, 1);
+            return categoryId;
+          }
+        }
+        const uncategorizedIndex = uncategorized.findIndex((entry) => entry.id === channelId);
+        if (uncategorizedIndex >= 0) {
+          uncategorized.splice(uncategorizedIndex, 1);
+        }
+        return null;
+      };
+
+      removeFromLists(source.id);
+
+      if (dropTarget.kind === 'category') {
+        if (!dropTarget.categoryId) {
+          uncategorized.push({ ...source, categoryId: null });
+        } else {
+          const destination = grouped.get(dropTarget.categoryId);
+          if (!destination) return null;
+          destination.push({ ...source, categoryId: dropTarget.categoryId });
+        }
+      } else {
+        const target = channels.find((channel) => channel.id === dropTarget.channelId);
+        if (!target || target.id === source.id) return null;
+
+        if (target.type === 'CATEGORY') {
+          const destination = grouped.get(target.id);
+          if (!destination) return null;
+          destination.push({ ...source, categoryId: target.id });
+        } else {
+          const destinationKey = target.categoryId ?? null;
+          const destinationList = destinationKey ? grouped.get(destinationKey) : uncategorized;
+          if (!destinationList) return null;
+          const targetIndex = destinationList.findIndex((entry) => entry.id === target.id);
+          if (targetIndex < 0) {
+            destinationList.push({ ...source, categoryId: destinationKey });
+          } else {
+            destinationList.splice(targetIndex, 0, { ...source, categoryId: destinationKey });
+          }
+        }
+      }
+
+      let position = 0;
+      const nextChannels: Channel[] = [];
+      for (const category of categories) {
+        nextChannels.push({
+          ...category,
+          categoryId: null,
+          position: position++
+        });
+        const children = grouped.get(category.id) ?? [];
+        for (const child of children) {
+          nextChannels.push({
+            ...child,
+            categoryId: category.id,
+            position: position++
+          });
+        }
+      }
+      for (const channel of uncategorized) {
+        nextChannels.push({
+          ...channel,
+          categoryId: null,
+          position: position++
+        });
+      }
+
+      return nextChannels;
+    },
+    [channels]
+  );
+
+  const handleDragStart = (channelId: string) => {
+    if (!canMoveChannels) return;
+    setDraggedChannelId(channelId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedChannelId(null);
+  };
+
+  const dropOnCategory = async (categoryId: string | null) => {
+    if (!canMoveChannels || !draggedChannelId) return;
+    const next = buildReorderedChannels(draggedChannelId, { kind: 'category', categoryId });
+    setDraggedChannelId(null);
+    if (!next) return;
+    await persistChannelReorder(next);
+  };
+
+  const dropBeforeChannel = async (channelId: string) => {
+    if (!canMoveChannels || !draggedChannelId) return;
+    const next = buildReorderedChannels(draggedChannelId, { kind: 'channel', channelId });
+    setDraggedChannelId(null);
+    if (!next) return;
+    await persistChannelReorder(next);
+  };
 
   const copyValue = useCallback(
     async (value: string, label: string) => {
@@ -1246,7 +1471,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         kickMember: false,
         banMember: false,
         muteChat: false,
-        muteVoice: false
+        muteVoice: false,
+        moveChannels: false
       });
       setError(null);
     } catch (nextError) {
@@ -1711,159 +1937,251 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                 <div className="mt-6 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_280px]">
                   <aside className="rounded-2xl border border-white/10 bg-black/15 p-3" onContextMenu={openChannelListContextMenu}>
                     <div className="soft-scroll max-h-[56vh] space-y-2 overflow-y-auto pr-1">
-                      {categoryChannels.map((category) => (
-                        <section key={category.id} className="space-y-1">
-                          <button
-                            type="button"
-                            data-channel-item="true"
-                            onClick={() => openChannel(category)}
-                            onContextMenu={(event) => openChannelContextMenu(event, category)}
-                            className={cn(
-                              'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm uppercase tracking-[0.12em] transition',
-                              activeChannelId === category.id
-                                ? 'border-emerald-200/45 bg-white/10'
-                                : 'border-transparent hover:border-white/20 hover:bg-white/5'
-                            )}
-                          >
-                            <span className="inline-flex items-center gap-2">
-                              <span className="text-emerald-100/85">::</span>
-                              <span>{category.name}</span>
-                            </span>
-                          </button>
+                      {categoryChannels.map((category) => {
+                        const categoryCollapsed = Boolean(collapsedCategoryIds[category.id]);
+                        const categoryItems = groupedChannels.categoryMap.get(category.id) ?? [];
 
-                          {(groupedChannels.categoryMap.get(category.id) ?? []).map((channel) => (
-                            <div key={channel.id} className="space-y-1 pl-3">
-                              <button
-                                type="button"
-                                data-channel-item="true"
-                                onClick={() => openChannel(channel)}
-                                onContextMenu={(event) => openChannelContextMenu(event, channel)}
-                                className={cn(
-                                  'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
-                                  activeChannelId === channel.id
-                                    ? 'border-emerald-200/45 bg-white/10'
-                                    : 'border-transparent hover:border-white/20 hover:bg-white/5'
-                                )}
-                              >
-                                <span className="inline-flex items-center gap-2">
-                                  {channel.type === 'VOICE' ? (
-                                    <svg
-                                      aria-hidden="true"
-                                      viewBox="0 0 24 24"
-                                      className="h-4 w-4 text-emerald-100/85"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
+                        return (
+                          <section
+                            key={category.id}
+                            className="space-y-1"
+                            onDragOver={(event) => {
+                              if (!canMoveChannels) return;
+                              event.preventDefault();
+                            }}
+                            onDrop={(event) => {
+                              if (!canMoveChannels) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void dropOnCategory(category.id);
+                            }}
+                          >
+                            <button
+                              type="button"
+                              data-channel-item="true"
+                              draggable={canMoveChannels}
+                              onDragStart={() => handleDragStart(category.id)}
+                              onDragEnd={handleDragEnd}
+                              onDragOver={(event) => {
+                                if (!canMoveChannels) return;
+                                event.preventDefault();
+                              }}
+                              onDrop={(event) => {
+                                if (!canMoveChannels) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void dropBeforeChannel(category.id);
+                              }}
+                              onClick={() =>
+                                setCollapsedCategoryIds((previous) => ({
+                                  ...previous,
+                                  [category.id]: !previous[category.id]
+                                }))
+                              }
+                              onContextMenu={(event) => openChannelContextMenu(event, category)}
+                              className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-sm uppercase tracking-[0.12em] transition hover:border-white/20 hover:bg-white/5"
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <span className="text-emerald-100/85">{categoryCollapsed ? '>' : 'v'}</span>
+                                <span>{category.name}</span>
+                              </span>
+                              {draggedChannelId === category.id ? <span className="text-[10px] text-emerald-100/70">Moving</span> : null}
+                            </button>
+
+                            {!categoryCollapsed
+                              ? categoryItems.map((channel) => (
+                                  <div key={channel.id} className="space-y-1 pl-3">
+                                    <button
+                                      type="button"
+                                      data-channel-item="true"
+                                      draggable={canMoveChannels}
+                                      onDragStart={() => handleDragStart(channel.id)}
+                                      onDragEnd={handleDragEnd}
+                                      onDragOver={(event) => {
+                                        if (!canMoveChannels) return;
+                                        event.preventDefault();
+                                      }}
+                                      onDrop={(event) => {
+                                        if (!canMoveChannels) return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        void dropBeforeChannel(channel.id);
+                                      }}
+                                      onClick={() => openChannel(channel)}
+                                      onContextMenu={(event) => openChannelContextMenu(event, channel)}
+                                      className={cn(
+                                        'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                                        activeChannelId === channel.id
+                                          ? 'border-emerald-200/45 bg-white/10'
+                                          : 'border-transparent hover:border-white/20 hover:bg-white/5'
+                                      )}
                                     >
-                                      <path d="M11 5 6 9H2v6h4l5 4V5Z" />
-                                      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-                                      <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
-                                    </svg>
-                                  ) : (
-                                    <span className="text-emerald-100/85">#</span>
-                                  )}
-                                  <span>{channel.name}</span>
-                                </span>
-                              </button>
-
-                              {channel.type === 'VOICE' &&
-                              connectedVoiceChannelId === channel.id &&
-                              displayedVoiceParticipants.length > 0 ? (
-                                <div className="flex items-center gap-1.5 px-2">
-                                  {displayedVoiceParticipants.map((participant) => {
-                                    const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
-                                    return avatarUrl ? (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img
-                                        key={participant.socketId}
-                                        src={avatarUrl}
-                                        alt={participant.displayName}
-                                        title={participant.displayName}
-                                        className="h-6 w-6 rounded-full border border-white/20 object-cover"
-                                      />
-                                    ) : (
-                                      <span
-                                        key={participant.socketId}
-                                        title={participant.displayName}
-                                        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
-                                      >
-                                        {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
+                                      <span className="inline-flex items-center gap-2">
+                                        {channel.type === 'VOICE' ? (
+                                          <svg
+                                            aria-hidden="true"
+                                            viewBox="0 0 24 24"
+                                            className="h-4 w-4 text-emerald-100/85"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          >
+                                            <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+                                            <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                                            <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+                                          </svg>
+                                        ) : (
+                                          <span className="text-emerald-100/85">#</span>
+                                        )}
+                                        <span>{channel.name}</span>
                                       </span>
-                                    );
-                                  })}
-                                </div>
-                              ) : null}
-                            </div>
-                          ))}
-                        </section>
-                      ))}
+                                    </button>
 
-                      {groupedChannels.uncategorized.map((channel) => (
-                        <div key={channel.id} className="space-y-1">
+                                    {channel.type === 'VOICE' &&
+                                    connectedVoiceChannelId === channel.id &&
+                                    displayedVoiceParticipants.length > 0 ? (
+                                      <div className="flex items-center gap-1.5 px-2">
+                                        {displayedVoiceParticipants.map((participant) => {
+                                          const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
+                                          return avatarUrl ? (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img
+                                              key={participant.socketId}
+                                              src={avatarUrl}
+                                              alt={participant.displayName}
+                                              title={participant.displayName}
+                                              className="h-6 w-6 rounded-full border border-white/20 object-cover"
+                                            />
+                                          ) : (
+                                            <span
+                                              key={participant.socketId}
+                                              title={participant.displayName}
+                                              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
+                                            >
+                                              {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ))
+                              : null}
+                          </section>
+                        );
+                      })}
+
+                      {groupedChannels.uncategorized.length > 0 ? (
+                        <section
+                          className="space-y-1"
+                          onDragOver={(event) => {
+                            if (!canMoveChannels) return;
+                            event.preventDefault();
+                          }}
+                          onDrop={(event) => {
+                            if (!canMoveChannels) return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void dropOnCategory(null);
+                          }}
+                        >
                           <button
                             type="button"
                             data-channel-item="true"
-                            onClick={() => openChannel(channel)}
-                            onContextMenu={(event) => openChannelContextMenu(event, channel)}
-                            className={cn(
-                              'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
-                              activeChannelId === channel.id
-                                ? 'border-emerald-200/45 bg-white/10'
-                                : 'border-transparent hover:border-white/20 hover:bg-white/5'
-                            )}
+                            onClick={() => setUncategorizedCollapsed((previous) => !previous)}
+                            className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-sm uppercase tracking-[0.12em] transition hover:border-white/20 hover:bg-white/5"
                           >
                             <span className="inline-flex items-center gap-2">
-                              {channel.type === 'VOICE' ? (
-                                <svg
-                                  aria-hidden="true"
-                                  viewBox="0 0 24 24"
-                                  className="h-4 w-4 text-emerald-100/85"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <path d="M11 5 6 9H2v6h4l5 4V5Z" />
-                                  <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-                                  <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
-                                </svg>
-                              ) : (
-                                <span className="text-emerald-100/85">#</span>
-                              )}
-                              <span>{channel.name}</span>
+                              <span className="text-emerald-100/85">{uncategorizedCollapsed ? '>' : 'v'}</span>
+                              <span>Channels</span>
                             </span>
                           </button>
 
-                          {channel.type === 'VOICE' && connectedVoiceChannelId === channel.id && displayedVoiceParticipants.length > 0 ? (
-                            <div className="flex items-center gap-1.5 px-2">
-                              {displayedVoiceParticipants.map((participant) => {
-                                const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
-                                return avatarUrl ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    key={participant.socketId}
-                                    src={avatarUrl}
-                                    alt={participant.displayName}
-                                    title={participant.displayName}
-                                    className="h-6 w-6 rounded-full border border-white/20 object-cover"
-                                  />
-                                ) : (
-                                  <span
-                                    key={participant.socketId}
-                                    title={participant.displayName}
-                                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
+                          {!uncategorizedCollapsed
+                            ? groupedChannels.uncategorized.map((channel) => (
+                                <div key={channel.id} className="space-y-1">
+                                  <button
+                                    type="button"
+                                    data-channel-item="true"
+                                    draggable={canMoveChannels}
+                                    onDragStart={() => handleDragStart(channel.id)}
+                                    onDragEnd={handleDragEnd}
+                                    onDragOver={(event) => {
+                                      if (!canMoveChannels) return;
+                                      event.preventDefault();
+                                    }}
+                                    onDrop={(event) => {
+                                      if (!canMoveChannels) return;
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      void dropBeforeChannel(channel.id);
+                                    }}
+                                    onClick={() => openChannel(channel)}
+                                    onContextMenu={(event) => openChannelContextMenu(event, channel)}
+                                    className={cn(
+                                      'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                                      activeChannelId === channel.id
+                                        ? 'border-emerald-200/45 bg-white/10'
+                                        : 'border-transparent hover:border-white/20 hover:bg-white/5'
+                                    )}
                                   >
-                                    {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
+                                    <span className="inline-flex items-center gap-2">
+                                      {channel.type === 'VOICE' ? (
+                                        <svg
+                                          aria-hidden="true"
+                                          viewBox="0 0 24 24"
+                                          className="h-4 w-4 text-emerald-100/85"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="2"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        >
+                                          <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+                                          <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                                          <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+                                        </svg>
+                                      ) : (
+                                        <span className="text-emerald-100/85">#</span>
+                                      )}
+                                      <span>{channel.name}</span>
+                                    </span>
+                                  </button>
+
+                                  {channel.type === 'VOICE' &&
+                                  connectedVoiceChannelId === channel.id &&
+                                  displayedVoiceParticipants.length > 0 ? (
+                                    <div className="flex items-center gap-1.5 px-2">
+                                      {displayedVoiceParticipants.map((participant) => {
+                                        const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
+                                        return avatarUrl ? (
+                                          // eslint-disable-next-line @next/next/no-img-element
+                                          <img
+                                            key={participant.socketId}
+                                            src={avatarUrl}
+                                            alt={participant.displayName}
+                                            title={participant.displayName}
+                                            className="h-6 w-6 rounded-full border border-white/20 object-cover"
+                                          />
+                                        ) : (
+                                          <span
+                                            key={participant.socketId}
+                                            title={participant.displayName}
+                                            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
+                                          >
+                                            {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ))
+                            : null}
+                        </section>
+                      ) : null}
 
                       {channels.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-white/20 p-4 text-xs text-slate-400">

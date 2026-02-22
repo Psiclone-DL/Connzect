@@ -16,22 +16,30 @@ export const ChannelList = ({ serverId, channels, activeChannelId }: ChannelList
       <p className="mb-3 px-1 text-xs uppercase tracking-[0.2em] text-slate-400">Channels</p>
       <div className="space-y-2">
         {channels.map((channel) => (
-          <Link
-            key={channel.id}
-            href={`/server/${serverId}/channel/${channel.id}`}
-            className={cn(
-              'flex min-w-0 items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-sm transition hover:border-white/20 hover:bg-white/5',
-              activeChannelId === channel.id ? 'border-burgundySoft/50 bg-white/5' : ''
-            )}
-          >
-            <span className="truncate">
-              {channel.type === 'CATEGORY' ? '::' : channel.type === 'VOICE' ? '🔊' : '#'}
-              {channel.name}
-            </span>
-            <span className="shrink-0 text-xs text-slate-400">
-              {channel.type === 'TEXT' ? 'Text' : channel.type === 'VOICE' ? 'Voice' : 'Category'}
-            </span>
-          </Link>
+          channel.type === 'CATEGORY' ? (
+            <div
+              key={channel.id}
+              className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-sm uppercase tracking-[0.1em] text-slate-300"
+            >
+              <span className="truncate">::{channel.name}</span>
+              <span className="shrink-0 text-xs text-slate-500">Category</span>
+            </div>
+          ) : (
+            <Link
+              key={channel.id}
+              href={`/server/${serverId}/channel/${channel.id}`}
+              className={cn(
+                'flex min-w-0 items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-sm transition hover:border-white/20 hover:bg-white/5',
+                activeChannelId === channel.id ? 'border-burgundySoft/50 bg-white/5' : ''
+              )}
+            >
+              <span className="truncate">
+                {channel.type === 'VOICE' ? '🔊' : '#'}
+                {channel.name}
+              </span>
+              <span className="shrink-0 text-xs text-slate-400">{channel.type === 'TEXT' ? 'Text' : 'Voice'}</span>
+            </Link>
+          )
         ))}
       </div>
     </section>
