@@ -76,6 +76,16 @@ const waitForServer = (url, timeoutMs = 60_000) =>
     tryConnect();
   });
 
+const appendDesktopVersionParam = (url) => {
+  try {
+    const target = new URL(url);
+    target.searchParams.set('desktopVersion', app.getVersion());
+    return target.toString();
+  } catch {
+    return url;
+  }
+};
+
 const resolveSplashLogoSource = () => {
   const candidates = [];
   const customPath = process.env.CONNZECT_SPLASH_LOGO_PATH;
@@ -639,11 +649,12 @@ const loadWebApp = async () => {
     }
 
     const webUrl = await resolveWebUrl();
-    if (mainWindow.webContents.getURL() !== webUrl) {
+    const targetWebUrl = appendDesktopVersionParam(webUrl);
+    if (mainWindow.webContents.getURL() !== targetWebUrl) {
       if (!startupCompleted) {
         await setSplashStatus({ message: 'Opening Connzect workspace...' });
       }
-      await mainWindow.loadURL(webUrl);
+      await mainWindow.loadURL(targetWebUrl);
     }
 
     if (OPEN_DEVTOOLS && !mainWindow.webContents.isDevToolsOpened()) {

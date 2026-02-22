@@ -119,6 +119,7 @@ const VOICE_VIDEO_QUALITY_OPTIONS: Array<{ value: VideoQuality; label: string }>
 ];
 
 const SERVER_ORDER_STORAGE_PREFIX = 'connzect:server-order:';
+const DESKTOP_VERSION_STORAGE_KEY = 'connzect:desktop-version';
 
 type RolePermissionDraft = {
   kickMember: boolean;
@@ -249,6 +250,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [voiceSettingsError, setVoiceSettingsError] = useState<string | null>(null);
   const [voiceSettingsSuccess, setVoiceSettingsSuccess] = useState<string | null>(null);
   const [isSavingProfilePhoto, setIsSavingProfilePhoto] = useState(false);
+  const [desktopVersionLabel, setDesktopVersionLabel] = useState<string | null>(null);
   const [audioInputDevices, setAudioInputDevices] = useState<AudioDeviceOption[]>([]);
   const [audioOutputDevices, setAudioOutputDevices] = useState<AudioDeviceOption[]>([]);
   const [selectedAudioInputId, setSelectedAudioInputId] = useState('');
@@ -478,6 +480,43 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setTabletSidebarCollapsed(false);
     }
   }, [isTabletViewport]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const normalizeVersion = (value: string): string =>
+      value
+        .trim()
+        .replace(/[^0-9a-zA-Z.+_-]/g, '')
+        .slice(0, 32);
+
+    let queryVersion = '';
+    try {
+      queryVersion = normalizeVersion(new URLSearchParams(window.location.search).get('desktopVersion') ?? '');
+    } catch {
+      queryVersion = '';
+    }
+
+    let storedVersion = '';
+    try {
+      storedVersion = normalizeVersion(window.localStorage.getItem(DESKTOP_VERSION_STORAGE_KEY) ?? '');
+    } catch {
+      storedVersion = '';
+    }
+
+    const resolvedVersion = queryVersion || storedVersion;
+    if (!resolvedVersion) {
+      setDesktopVersionLabel(null);
+      return;
+    }
+
+    setDesktopVersionLabel(`Version ${resolvedVersion}`);
+    try {
+      window.localStorage.setItem(DESKTOP_VERSION_STORAGE_KEY, resolvedVersion);
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, []);
 
   useEffect(() => {
     if (!audioInputStorageKey || typeof window === 'undefined') {
@@ -2095,6 +2134,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                       <div className="truncate rounded-md border border-emerald-200/30 bg-emerald-300/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-100">
                         Voice: {connectedVoiceChannelName || 'Connected'}
                       </div>
+                    ) : null}
+                    {desktopVersionLabel ? (
+                      <p className="truncate text-[10px] uppercase tracking-[0.1em] text-slate-400">{desktopVersionLabel}</p>
                     ) : null}
                   </div>
 
