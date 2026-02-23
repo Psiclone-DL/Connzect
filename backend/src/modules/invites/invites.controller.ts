@@ -5,6 +5,7 @@ import { HttpError } from '../../utils/httpError';
 import { routeParam } from '../../utils/params';
 import { Permission } from '../../utils/permissions';
 import { pickInviteCode } from './invite-code';
+import { notifyServerMemberActivity } from '../servers/server-activity';
 import { requireServerPermission } from '../servers/server-access';
 
 export const createInvite = async (req: Request, res: Response): Promise<void> => {
@@ -79,6 +80,17 @@ export const joinByInvite = async (req: Request, res: Response): Promise<void> =
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
   const code = routeParam(req.params.code);
+  const joiningUser = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      id: true,
+      displayName: true
+    }
+  });
+
+  if (!joiningUser) {
+    throw new HttpError(404, 'User not found');
+  }
 
   const joined = await prisma.$transaction(async (tx) => {
     const invite = await tx.invite.findUnique({
@@ -171,6 +183,15 @@ export const joinByInvite = async (req: Request, res: Response): Promise<void> =
       memberId: member.id
     };
   });
+
+  if (joined.joined) {
+    await notifyServerMemberActivity({
+      serverId: joined.server.id,
+      userId: joiningUser.id,
+      displayName: joiningUser.displayName,
+      activity: 'join'
+    });
+  }
 
   res.status(StatusCodes.OK).json(joined);
 };

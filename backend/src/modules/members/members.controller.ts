@@ -4,10 +4,21 @@ import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
 import { routeParam } from '../../utils/params';
 import { Permission } from '../../utils/permissions';
+import { notifyServerMemberActivity } from '../servers/server-activity';
 import { requireServerPermission } from '../servers/server-access';
 
 const ensureNotOwner = async (serverId: string, memberId: string) => {
-  const member = await prisma.serverMember.findUnique({ where: { id: memberId } });
+  const member = await prisma.serverMember.findUnique({
+    where: { id: memberId },
+    include: {
+      user: {
+        select: {
+          id: true,
+          displayName: true
+        }
+      }
+    }
+  });
   if (!member || member.serverId !== serverId) {
     throw new HttpError(404, 'Member not found');
   }
@@ -34,6 +45,13 @@ export const kickMember = async (req: Request, res: Response): Promise<void> => 
   const member = await ensureNotOwner(serverId, memberId);
 
   await prisma.serverMember.delete({ where: { id: member.id } });
+  await notifyServerMemberActivity({
+    serverId,
+    userId: member.user.id,
+    displayName: member.user.displayName,
+    activity: 'leave'
+  });
+
   res.status(StatusCodes.OK).json({ message: 'Member kicked' });
 };
 
@@ -53,6 +71,15 @@ export const banMember = async (req: Request, res: Response): Promise<void> => {
     }
   });
 
+  if (!member.isBanned) {
+    await notifyServerMemberActivity({
+      serverId,
+      userId: member.user.id,
+      displayName: member.user.displayName,
+      activity: 'leave'
+    });
+  }
+
   res.status(StatusCodes.OK).json({ message: 'Member banned' });
 };
 
@@ -70,6 +97,14 @@ export const leaveServer = async (req: Request, res: Response): Promise<void> =>
       serverId_userId: {
         serverId,
         userId: req.user.id
+      }
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          displayName: true
+        }
       }
     }
   });
@@ -105,6 +140,15 @@ export const leaveServer = async (req: Request, res: Response): Promise<void> =>
       await tx.server.delete({ where: { id: serverId } });
     });
 
+    if (nextOwnerMember) {
+      await notifyServerMemberActivity({
+        serverId,
+        userId: member.user.id,
+        displayName: member.user.displayName,
+        activity: 'leave'
+      });
+    }
+
     res.status(StatusCodes.OK).json({
       message: nextOwnerMember
         ? 'Ownership transferred and you left the server'
@@ -114,5 +158,12 @@ export const leaveServer = async (req: Request, res: Response): Promise<void> =>
   }
 
   await prisma.serverMember.delete({ where: { id: member.id } });
+  await notifyServerMemberActivity({
+    serverId,
+    userId: member.user.id,
+    displayName: member.user.displayName,
+    activity: 'leave'
+  });
+
   res.status(StatusCodes.OK).json({ message: 'Left server' });
 };

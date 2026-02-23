@@ -50,6 +50,7 @@ model Server {
   id        String         @id @default(uuid())
   name      String
   iconUrl   String?
+  systemMessageChannelId String?
   ownerId   String
   owner     User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   createdAt DateTime       @default(now())

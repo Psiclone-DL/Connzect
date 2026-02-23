@@ -9,6 +9,7 @@ export interface ConnzectServer {
   id: string;
   name: string;
   iconUrl?: string | null;
+  systemMessageChannelId?: string | null;
   ownerId: string;
   createdAt: string;
 }

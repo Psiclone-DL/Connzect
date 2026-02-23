@@ -5,6 +5,7 @@ import { HttpError } from '../../utils/httpError';
 import { routeParam } from '../../utils/params';
 import { Permission } from '../../utils/permissions';
 import { pickInviteCode } from '../invites/invite-code';
+import { notifyServerMemberActivity } from './server-activity';
 import { requireServerPermission } from './server-access';
 
 const serializeRole = <T extends { permissions: bigint }>(role: T) => ({
@@ -166,9 +167,34 @@ export const updateServer = async (req: Request, res: Response): Promise<void> =
     throw new HttpError(400, 'Server name must be between 2 and 80 characters');
   }
 
-  const nextIconUrl = req.file ? `/uploads/${req.file.filename}` : undefined;
+  const hasSystemMessageChannelInput = Object.prototype.hasOwnProperty.call(req.body, 'systemMessageChannelId');
+  const nextSystemMessageChannelId = hasSystemMessageChannelInput
+    ? typeof req.body.systemMessageChannelId === 'string'
+      ? req.body.systemMessageChannelId.trim() || null
+      : req.body.systemMessageChannelId === null
+        ? null
+        : existing.systemMessageChannelId
+    : existing.systemMessageChannelId;
 
-  if (!nextName && !nextIconUrl) {
+  if (hasSystemMessageChannelInput && nextSystemMessageChannelId) {
+    const channel = await prisma.channel.findFirst({
+      where: {
+        id: nextSystemMessageChannelId,
+        serverId,
+        type: 'TEXT'
+      },
+      select: { id: true }
+    });
+
+    if (!channel) {
+      throw new HttpError(400, 'System message channel must be a text channel in this server');
+    }
+  }
+
+  const nextIconUrl = req.file ? `/uploads/${req.file.filename}` : undefined;
+  const hasSystemMessageChannelChange = nextSystemMessageChannelId !== existing.systemMessageChannelId;
+
+  if (!nextName && !nextIconUrl && !hasSystemMessageChannelChange) {
     throw new HttpError(400, 'No server settings changes were provided');
   }
 
@@ -176,7 +202,8 @@ export const updateServer = async (req: Request, res: Response): Promise<void> =
     where: { id: serverId },
     data: {
       name: nextName ?? existing.name,
-      iconUrl: nextIconUrl ?? existing.iconUrl
+      iconUrl: nextIconUrl ?? existing.iconUrl,
+      systemMessageChannelId: nextSystemMessageChannelId
     }
   });
 
@@ -195,6 +222,19 @@ export const addMemberByEmail = async (req: Request, res: Response): Promise<voi
   if (!user) {
     throw new HttpError(404, 'User not found');
   }
+
+  const existingMembership = await prisma.serverMember.findUnique({
+    where: {
+      serverId_userId: {
+        serverId,
+        userId: user.id
+      }
+    },
+    select: {
+      id: true,
+      isBanned: true
+    }
+  });
 
   const defaultRole = await prisma.role.findFirst({
     where: { serverId, isDefault: true }
@@ -235,6 +275,16 @@ export const addMemberByEmail = async (req: Request, res: Response): Promise<voi
       }
     }
   });
+
+  const joinedNow = !existingMembership || existingMembership.isBanned;
+  if (joinedNow) {
+    await notifyServerMemberActivity({
+      serverId,
+      userId: user.id,
+      displayName: user.displayName,
+      activity: 'join'
+    });
+  }
 
   res.status(StatusCodes.CREATED).json(member);
 };

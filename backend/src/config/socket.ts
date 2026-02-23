@@ -164,6 +164,22 @@ export const setupSocket = (io: Server): void => {
   io.on('connection', (socket) => {
     const authedSocket = socket as AuthenticatedSocket;
 
+    authedSocket.on('server:join', async ({ serverId }: { serverId: string }) => {
+      try {
+        await getMemberContext(serverId, authedSocket.data.userId);
+        authedSocket.join(`server:${serverId}`);
+      } catch (error) {
+        authedSocket.emit('error:event', {
+          scope: 'server:join',
+          message: error instanceof Error ? error.message : 'Failed to subscribe to server'
+        });
+      }
+    });
+
+    authedSocket.on('server:leave', ({ serverId }: { serverId: string }) => {
+      authedSocket.leave(`server:${serverId}`);
+    });
+
     authedSocket.on('channel:join', async ({ channelId }: { channelId: string }) => {
       try {
         await ensureChannelMessagingAccess(channelId, authedSocket.data.userId);

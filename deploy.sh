@@ -130,6 +130,9 @@ if [[ "$AUTO_COMMIT" == "1" ]]; then
   fi
 fi
 
+log "Generating Prisma client"
+npm run prisma:generate --workspace backend
+
 log "Building backend workspace"
 npm run build --workspace backend
 

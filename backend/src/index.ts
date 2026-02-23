@@ -4,6 +4,7 @@ import { buildApp } from './app';
 import { env } from './config/env';
 import { prisma } from './config/prisma';
 import { setupSocket } from './config/socket';
+import { setSocketServer } from './config/socket-server';
 
 const app = buildApp();
 const server = http.createServer(app);
@@ -15,6 +16,7 @@ const io = new Server(server, {
   }
 });
 
+setSocketServer(io);
 setupSocket(io);
 
 server.listen(env.PORT, () => {

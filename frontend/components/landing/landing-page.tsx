@@ -300,6 +300,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [serverSettingsTab, setServerSettingsTab] = useState<'general' | 'permissions'>('general');
   const [serverSettingsName, setServerSettingsName] = useState('');
   const [serverSettingsIconFile, setServerSettingsIconFile] = useState<File | null>(null);
+  const [serverSettingsSystemChannelId, setServerSettingsSystemChannelId] = useState('');
   const [isSavingServerSettings, setIsSavingServerSettings] = useState(false);
   const [inviteManagerOpen, setInviteManagerOpen] = useState(false);
   const [inviteManagerServer, setInviteManagerServer] = useState<ConnzectServer | null>(null);
@@ -458,6 +459,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     persistServerOrder(ordered);
     return ordered;
   }, [applyStoredServerOrder, authRequest, persistServerOrder]);
+
+  const refreshActiveServerDetails = useCallback(
+    async (serverId: string) => {
+      const details = await authRequest<ServerDetails>(`/servers/${serverId}`);
+      setServerMembers(details.members);
+      setServerRoles(details.roles);
+    },
+    [authRequest]
+  );
 
   useEffect(() => {
     if (loading || !user) {
@@ -757,6 +767,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     const selected = servers.find((server) => server.id === activeServerId);
     if (!selected) return;
     setServerSettingsName(selected.name);
+    setServerSettingsSystemChannelId(selected.systemMessageChannelId ?? '');
   }, [activeServerId, servers]);
 
   useEffect(
@@ -841,6 +852,31 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       cancelled = true;
     };
   }, [activeServerId, authRequest]);
+
+  useEffect(() => {
+    if (!socket || !activeServerId) return;
+
+    const currentServerId = activeServerId;
+    const joinServerRoom = () => {
+      socket.emit('server:join', { serverId: currentServerId });
+    };
+    const onMembersChanged = (payload: { serverId: string }) => {
+      if (payload.serverId !== currentServerId) return;
+      refreshActiveServerDetails(currentServerId).catch((nextError) => {
+        setError(nextError instanceof Error ? nextError.message : 'Failed to refresh server members');
+      });
+    };
+
+    joinServerRoom();
+    socket.on('server:members:changed', onMembersChanged);
+    socket.on('connect', joinServerRoom);
+
+    return () => {
+      socket.emit('server:leave', { serverId: currentServerId });
+      socket.off('server:members:changed', onMembersChanged);
+      socket.off('connect', joinServerRoom);
+    };
+  }, [activeServerId, refreshActiveServerDetails, socket]);
 
   useEffect(() => {
     if (channels.length === 0) {
@@ -1004,6 +1040,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     () => Math.max(0, serverInvites.length - availableServerInvites.length),
     [availableServerInvites.length, serverInvites.length]
   );
+  const textChannels = useMemo(
+    () => channels.filter((channel) => channel.type === 'TEXT').sort((left, right) => left.position - right.position),
+    [channels]
+  );
   const categoryChannels = useMemo(
     () => channels.filter((channel) => channel.type === 'CATEGORY').sort((left, right) => left.position - right.position),
     [channels]
@@ -1053,11 +1093,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (!activeServer) {
       setServerSettingsName('');
       setServerSettingsIconFile(null);
+      setServerSettingsSystemChannelId('');
       return;
     }
 
     setServerSettingsName(activeServer.name);
     setServerSettingsIconFile(null);
+    setServerSettingsSystemChannelId(activeServer.systemMessageChannelId ?? '');
   }, [activeServer]);
 
   useEffect(() => {
@@ -1819,15 +1861,6 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     socket.emit('message:delete', { channelId: activeChatChannelId, messageId });
   };
 
-  const refreshActiveServerDetails = useCallback(
-    async (serverId: string) => {
-      const details = await authRequest<ServerDetails>(`/servers/${serverId}`);
-      setServerMembers(details.members);
-      setServerRoles(details.roles);
-    },
-    [authRequest]
-  );
-
   const saveServerSettings = async (event: FormEvent) => {
     event.preventDefault();
     if (!activeServer || isSavingServerSettings) return;
@@ -1835,8 +1868,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     const trimmedName = serverSettingsName.trim();
     const hasNameChange = trimmedName.length > 0 && trimmedName !== activeServer.name;
     const hasIconChange = Boolean(serverSettingsIconFile);
+    const normalizedSystemChannelId = serverSettingsSystemChannelId || null;
+    const hasSystemChannelChange = normalizedSystemChannelId !== (activeServer.systemMessageChannelId ?? null);
 
-    if (!hasNameChange && !hasIconChange) {
+    if (!hasNameChange && !hasIconChange && !hasSystemChannelChange) {
       setError('No server changes to save.');
       return;
     }
@@ -1849,6 +1884,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     const payload = new FormData();
     if (hasNameChange) payload.append('name', trimmedName);
     if (serverSettingsIconFile) payload.append('icon', serverSettingsIconFile);
+    if (hasSystemChannelChange) payload.append('systemMessageChannelId', normalizedSystemChannelId ?? '');
 
     setIsSavingServerSettings(true);
     try {
@@ -1859,6 +1895,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setServers((previous) => previous.map((server) => (server.id === updated.id ? { ...server, ...updated } : server)));
       setServerSettingsName(updated.name);
       setServerSettingsIconFile(null);
+      setServerSettingsSystemChannelId(updated.systemMessageChannelId ?? '');
       setError(null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update server settings');
@@ -3642,6 +3679,25 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                       maxLength={80}
                       className="mt-3"
                     />
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">Join/leave system messages</p>
+                    <select
+                      value={serverSettingsSystemChannelId}
+                      onChange={(event) => setServerSettingsSystemChannelId(event.target.value)}
+                      className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none transition"
+                    >
+                      <option value="">Disabled</option>
+                      {textChannels.map((channel) => (
+                        <option key={channel.id} value={channel.id}>
+                          #{channel.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-xs text-slate-400">
+                      When enabled, Connzect posts a message here whenever someone joins or exits the server.
+                    </p>
                   </div>
 
                   <div className="flex items-center justify-end gap-2">
