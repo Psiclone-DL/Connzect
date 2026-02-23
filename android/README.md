@@ -4,7 +4,7 @@ This folder contains a native Android WebView wrapper for Connzect.
 
 ## Configure target web URL
 
-Default URL is `http://5.75.169.93:3002`.
+Default URL is `http://5.75.169.93`.
 
 To override it at build time:
 

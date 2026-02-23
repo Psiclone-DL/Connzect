@@ -3,7 +3,7 @@ plugins {
   id("org.jetbrains.kotlin.android")
 }
 
-val connzectWebUrl = providers.gradleProperty("CONNZECT_WEB_URL").orElse("http://5.75.169.93:3002")
+val connzectWebUrl = providers.gradleProperty("CONNZECT_WEB_URL").orElse("http://5.75.169.93")
 val connzectKeystorePath = providers.gradleProperty("CONNZECT_ANDROID_KEYSTORE_PATH").orNull
 val connzectKeystorePassword = providers.gradleProperty("CONNZECT_ANDROID_KEYSTORE_PASSWORD").orNull
 val connzectKeyAlias = providers.gradleProperty("CONNZECT_ANDROID_KEY_ALIAS").orNull
