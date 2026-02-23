@@ -43,12 +43,12 @@ build_android_apk() {
   fi
 
   if [[ -x "$ROOT_DIR/android/gradlew" ]]; then
-    (cd "$ROOT_DIR/android" && ./gradlew assembleRelease)
+    (cd "$ROOT_DIR/android" && ./gradlew :app:assembleRelease)
     return
   fi
 
   require_cmd gradle
-  (cd "$ROOT_DIR/android" && gradle assembleRelease)
+  (cd "$ROOT_DIR/android" && gradle :app:assembleRelease)
 }
 
 while [[ $# -gt 0 ]]; do
