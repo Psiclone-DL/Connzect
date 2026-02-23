@@ -23,6 +23,7 @@ ENV NODE_ENV=production
 
 COPY --from=builder /app/frontend/.next/standalone ./
 COPY --from=builder /app/frontend/.next/static ./frontend/.next/static
+COPY --from=builder /app/frontend/public ./frontend/public
 
 EXPOSE 3000
 

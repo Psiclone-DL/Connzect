@@ -51,6 +51,9 @@ services:
         NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL}
     container_name: connzect-frontend
     restart: unless-stopped
+    environment:
+      CONNZECT_ANDROID_APK_URL: ${CONNZECT_ANDROID_APK_URL}
+      CONNZECT_DESKTOP_INSTALLER_URL: ${CONNZECT_DESKTOP_INSTALLER_URL}
     depends_on:
       backend:
         condition: service_started

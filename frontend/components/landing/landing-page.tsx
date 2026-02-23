@@ -1648,6 +1648,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     logout().then(() => router.replace('/login'));
   };
 
+  const handleDownloadClick = useCallback((target: 'apk' | 'installer') => {
+    window.location.assign(`/download/${target}`);
+  }, []);
+
   const changeProfilePhoto = async (file: File) => {
     if (!user || isSavingProfilePhoto) return;
     if (!file.type.startsWith('image/')) {
@@ -2353,7 +2357,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
               </div>
             </div>
 
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               {user ? (
                 <>
                   <Button variant="soft" onClick={handleLogout}>
@@ -2362,6 +2366,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                 </>
               ) : (
                 <>
+                  <Button variant="soft" className="px-3 py-2 text-xs" onClick={() => handleDownloadClick('apk')}>
+                    Download APK
+                  </Button>
+                  <Button variant="soft" className="px-3 py-2 text-xs" onClick={() => handleDownloadClick('installer')}>
+                    Download Installer
+                  </Button>
                   <Button variant="soft" className="hidden sm:inline-flex" onClick={() => router.push('/register')}>
                     Register
                   </Button>

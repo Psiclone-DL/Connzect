@@ -58,6 +58,7 @@ done
 
 require_cmd git
 require_cmd docker
+require_cmd node
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   printf 'Not a git repository: %s\n' "$ROOT_DIR" >&2
@@ -99,6 +100,9 @@ fi
 
 log "Pushing branch $BRANCH to origin"
 git push origin "$BRANCH"
+
+log "Preparing downloadable artifacts (APK/Installer) for frontend"
+npm run prepare:downloads
 
 log "Deploying containers (backend, frontend, nginx)"
 docker compose -f docker-compose.yml up -d --build backend frontend nginx

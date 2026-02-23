@@ -13,6 +13,7 @@
     "dev:backend": "npm run dev --workspace backend",
     "dev:frontend": "npm run dev --workspace frontend",
     "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "prepare:downloads": "node scripts/prepare-downloads.js",
     "build:desktop": "node -e \"console.log('Connzect desktop uses remote web app; no bundled frontend runtime required.')\"",
     "desktop": "electron .",
     "dev:desktop": "cross-env CONNZECT_WEB_URL=http://127.0.0.1:3000 CONNZECT_DEVTOOLS=1 electron .",

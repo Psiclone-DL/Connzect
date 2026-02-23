@@ -147,6 +147,47 @@ npm run dev
 
 Frontend runs on `http://localhost:3000`.
 
+## Android (.apk) Build
+
+Connzect Android is a native WebView wrapper available in `android/`.
+
+### Prerequisites (Android build machine)
+
+- Android Studio (recommended) or Android SDK + Gradle
+- Java 17
+
+### Build release APK
+
+From Android Studio (recommended):
+
+1. Open `android/`.
+2. Let Gradle sync and install required SDKs.
+3. Use `Build > Build Bundle(s) / APK(s) > Build APK(s)`.
+
+From terminal (after Gradle wrapper is available in `android/`):
+
+```bash
+cd android
+./gradlew assembleRelease
+```
+
+Output:
+
+- `android/app/build/outputs/apk/release/app-release.apk`
+
+Optional web URL override:
+
+```bash
+cd android
+./gradlew assembleRelease -PCONNZECT_WEB_URL=https://your-domain.example
+```
+
+Then copy the APK to website downloads:
+
+```bash
+npm run prepare:downloads -- --apk android/app/build/outputs/apk/release/app-release.apk
+```
+
 ## Desktop (.exe) Build
 
 Connzect desktop is a thin Electron client that opens the VPS web app.
@@ -175,6 +216,12 @@ Output:
 
 - `desktop-dist/Connzect Setup *.exe`
 
+Copy latest installer to website downloads:
+
+```bash
+npm run prepare:downloads
+```
+
 ### Useful desktop scripts
 
 - `npm run dev:desktop`:
@@ -201,6 +248,44 @@ Flow-ul este automat prin GitHub Actions:
    - construieste `.exe` si publica release-ul pe GitHub
 
 When users open the app, it checks for updates at startup and every 30 minutes, downloads automatically in background, and applies on app quit.
+
+## Homepage Download Buttons
+
+Before login, homepage now exposes:
+
+- `Download APK` -> `/download/apk`
+- `Download Installer` -> `/download/installer`
+
+These routes work in two modes:
+
+1. Redirect mode (recommended for cloud/CDN artifacts):
+   - `CONNZECT_ANDROID_APK_URL`
+   - `CONNZECT_DESKTOP_INSTALLER_URL`
+2. Local file mode (served by Next.js):
+   - `frontend/public/downloads/Connzect-latest.apk`
+   - `frontend/public/downloads/Connzect-Setup-latest.exe`
+3. Default fallback mode (if neither redirect URL nor local file is available):
+   - Redirects to GitHub latest release:
+   - `https://github.com/Psiclone-DL/Connzect/releases/latest/download/Connzect-latest.apk`
+   - `https://github.com/Psiclone-DL/Connzect/releases/latest/download/Connzect-Setup-latest.exe`
+
+### Artifact prep script
+
+Use:
+
+```bash
+npm run prepare:downloads
+```
+
+Behavior:
+
+- Auto-picks newest desktop installer from `desktop-dist/`
+- Auto-picks newest APK from `android/app/build/outputs/apk/`
+- Copies to:
+  - `frontend/public/downloads/Connzect-latest.apk`
+  - `frontend/public/downloads/Connzect-Setup-latest.exe`
+
+`./deploy.sh` already runs this script automatically before Docker rebuild.
 
 ## API Overview
 

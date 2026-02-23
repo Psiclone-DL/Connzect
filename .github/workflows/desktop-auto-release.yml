@@ -46,3 +46,12 @@ jobs:
           npm version patch -m "chore(release): v%s [skip ci]"
           git push origin main --follow-tags
           npm run dist:win:publish
+
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          $installerPath = "desktop-dist/Connzect Setup $version.exe"
+          if (Test-Path $installerPath) {
+            gh release upload $tag "$installerPath#Connzect-Setup-latest.exe" --clobber
+          } else {
+            Write-Warning "Installer not found at $installerPath. Skipping stable installer alias upload."
+          }
