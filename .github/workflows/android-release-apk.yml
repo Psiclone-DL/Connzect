@@ -46,6 +46,7 @@ jobs:
         run: |
           yes | sdkmanager --licenses
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          echo "$ANDROID_HOME/build-tools/34.0.0" >> "$GITHUB_PATH"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -200,7 +201,18 @@ jobs:
             echo "Missing APK path."
             exit 1
           fi
-          apksigner verify --print-certs "$APK_PATH"
+          APKSIGNER_BIN="$(command -v apksigner || true)"
+          if [ -z "$APKSIGNER_BIN" ]; then
+            APKSIGNER_BIN="$(find "$ANDROID_HOME/build-tools" -maxdepth 3 -type f -name apksigner | sort -V | tail -n 1 || true)"
+          fi
+
+          if [ -z "$APKSIGNER_BIN" ]; then
+            echo "apksigner not found in PATH or Android SDK build-tools."
+            find "$ANDROID_HOME/build-tools" -maxdepth 3 -type f | head -n 200 || true
+            exit 1
+          fi
+
+          "$APKSIGNER_BIN" verify --print-certs "$APK_PATH"
 
       - name: Resolve release tag
         if: ${{ github.event_name == 'workflow_run' }}
