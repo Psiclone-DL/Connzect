@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 BRANCH="main"
 AUTO_COMMIT="0"
 COMMIT_MESSAGE=""
+APK_BUILD_OK="0"
 
 usage() {
   cat <<'EOF'
@@ -18,7 +19,7 @@ Usage:
 What it does:
   1) (optional) commits current changes
   2) builds backend + frontend workspaces
-  3) builds Android release APK
+  3) attempts Android release APK build
   4) pushes to origin/<branch>
   5) prepares frontend downloads (APK/Installer)
   6) rebuilds and restarts backend/frontend/nginx with Docker Compose
@@ -43,12 +44,24 @@ build_android_apk() {
   fi
 
   if [[ -x "$ROOT_DIR/android/gradlew" ]]; then
-    (cd "$ROOT_DIR/android" && ./gradlew :app:assembleRelease)
+    if (cd "$ROOT_DIR/android" && ./gradlew :app:assembleRelease); then
+      APK_BUILD_OK="1"
+    else
+      log "APK build failed via android/gradlew, continuing with existing APK artifact"
+    fi
     return
   fi
 
-  require_cmd gradle
-  (cd "$ROOT_DIR/android" && gradle :app:assembleRelease)
+  if ! command -v gradle >/dev/null 2>&1; then
+    log "Gradle not found and android/gradlew missing, skipping APK build"
+    return
+  fi
+
+  if (cd "$ROOT_DIR/android" && gradle :app:assembleRelease); then
+    APK_BUILD_OK="1"
+  else
+    log "APK build failed via system Gradle, continuing with existing APK artifact"
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -131,7 +144,7 @@ git push origin "$BRANCH"
 
 log "Preparing downloadable artifacts (APK/Installer) for frontend"
 APK_PATH="$ROOT_DIR/android/app/build/outputs/apk/release/app-release.apk"
-if [[ -f "$APK_PATH" ]]; then
+if [[ "$APK_BUILD_OK" == "1" && -f "$APK_PATH" ]]; then
   npm run prepare:downloads -- --apk "$APK_PATH"
 else
   npm run prepare:downloads
