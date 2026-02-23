@@ -1,6 +1,7 @@
 Place downloadable binaries here when you want local file serving instead of redirect URLs:
 
-- Connzect-latest.apk
+- app-release.apk (preferred)
+- Connzect-latest.apk (legacy fallback)
 - Connzect-Setup-latest.exe
 
 Homepage buttons download from:
