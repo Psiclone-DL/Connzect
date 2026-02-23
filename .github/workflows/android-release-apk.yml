@@ -52,6 +52,12 @@ jobs:
         with:
           gradle-version: 8.7
 
+      - name: Restore signing keystore cache
+        uses: actions/cache@v4
+        with:
+          path: android/signing/release-keystore.jks
+          key: android-signing-keystore-v1
+
       - name: Prepare Android signing inputs
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -63,6 +69,10 @@ jobs:
           ANDROIDAPP_KEY_ALIAS: ${{ secrets.ANDROIDAPP_KEY_ALIAS }}
           ANDROIDAPP_KEY_PASSWORD: ${{ secrets.ANDROIDAPP_KEY_PASSWORD }}
         run: |
+          mkdir -p android/signing
+          KEYSTORE_PATH="android/signing/release-keystore.jks"
+          SECRET_KEYSTORE_PATH="android/signing/release-keystore-from-secret.jks"
+
           KEYSTORE_BASE64="$ANDROID_KEYSTORE_BASE64"
           KEYSTORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
           KEY_ALIAS="$ANDROID_KEY_ALIAS"
@@ -81,19 +91,50 @@ jobs:
             KEY_PASSWORD="$ANDROIDAPP_KEY_PASSWORD"
           fi
 
-          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "Missing Android signing secrets."
-            echo "Supported secret sets:"
-            echo "1) ANDROID_KEYSTORE_BASE64 + ANDROID_KEYSTORE_PASSWORD + ANDROID_KEY_ALIAS + ANDROID_KEY_PASSWORD"
-            echo "2) ANDROIDAPP + ANDROIDAPP_KEYSTORE_PASSWORD + ANDROIDAPP_KEY_ALIAS + ANDROIDAPP_KEY_PASSWORD"
+          if [ -z "$KEY_ALIAS" ]; then
+            KEY_ALIAS="connzect"
+          fi
+
+          if [ -z "$KEY_PASSWORD" ]; then
+            KEY_PASSWORD="$KEYSTORE_PASSWORD"
+          fi
+
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            if echo "$KEYSTORE_BASE64" | base64 -d > "$SECRET_KEYSTORE_PATH" 2>/dev/null; then
+              mv -f "$SECRET_KEYSTORE_PATH" "$KEYSTORE_PATH"
+              echo "Using keystore decoded from secret."
+            else
+              rm -f "$SECRET_KEYSTORE_PATH"
+              echo "Provided keystore secret is not valid base64. Falling back to cached/generated keystore."
+            fi
+          fi
+
+          if [ ! -f "$KEYSTORE_PATH" ]; then
+            if [ -z "$KEYSTORE_PASSWORD" ]; then
+              echo "Missing keystore password."
+              echo "Set either ANDROID_KEYSTORE_PASSWORD or ANDROIDAPP_KEYSTORE_PASSWORD."
+              exit 1
+            fi
+            echo "No keystore found. Generating a new release keystore."
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -storepass "$KEYSTORE_PASSWORD" \
+              -alias "$KEY_ALIAS" \
+              -keypass "$KEY_PASSWORD" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Connzect, OU=Connzect, O=Connzect, L=Bucharest, S=Bucharest, C=RO"
+          fi
+
+          if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "Keystore validation failed for alias/password."
+            echo "Fix secrets ANDROIDAPP_KEYSTORE_PASSWORD / ANDROIDAPP_KEY_ALIAS / ANDROIDAPP_KEY_PASSWORD (or ANDROID_* variants)."
             exit 1
           fi
 
-          mkdir -p android/signing
-          echo "$KEYSTORE_BASE64" | base64 -d > android/signing/release-keystore.jks
-
           {
-            echo "CONNZECT_ANDROID_KEYSTORE_PATH=android/signing/release-keystore.jks"
+            echo "CONNZECT_ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH"
             echo "CONNZECT_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
             echo "CONNZECT_ANDROID_KEY_ALIAS=$KEY_ALIAS"
             echo "CONNZECT_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"

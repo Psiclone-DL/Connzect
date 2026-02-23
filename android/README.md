@@ -38,6 +38,15 @@ For release install builds, configure signing in CI via GitHub repo secrets:
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
+Alternative naming supported:
+
+- `ANDROIDAPP` (same as `ANDROID_KEYSTORE_BASE64`)
+- `ANDROIDAPP_KEYSTORE_PASSWORD`
+- `ANDROIDAPP_KEY_ALIAS`
+- `ANDROIDAPP_KEY_PASSWORD`
+
+If no keystore base64 secret is valid, CI generates one automatically and caches it for future runs.
+
 The workflow `Android APK Release Asset` now:
 
 1. Decodes keystore from secrets

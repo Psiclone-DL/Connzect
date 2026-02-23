@@ -204,7 +204,16 @@ Repository secrets required for signed APK publishing:
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
+Alternative secret names also supported:
+
+- `ANDROIDAPP`
+- `ANDROIDAPP_KEYSTORE_PASSWORD`
+- `ANDROIDAPP_KEY_ALIAS`
+- `ANDROIDAPP_KEY_PASSWORD`
+
 Workflow `Android APK Release Asset` decodes keystore, builds signed release APK, verifies signature, and uploads it as `Connzect-latest.apk`.
+
+If no valid keystore base64 secret is provided, workflow generates a release keystore and reuses it from Actions cache.
 
 ## Desktop (.exe) Build
 
