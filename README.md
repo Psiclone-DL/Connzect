@@ -175,6 +175,13 @@ Output:
 
 - `android/app/build/outputs/apk/release/app-release.apk`
 
+Important:
+
+- Install builds must be signed.
+- Unsigned files (for example `app-release-unsigned.apk`) can fail with:
+  - `App not installed`
+  - `Package appears to be invalid`
+
 Optional web URL override:
 
 ```bash
@@ -187,6 +194,17 @@ Then copy the APK to website downloads:
 ```bash
 npm run prepare:downloads -- --apk android/app/build/outputs/apk/release/app-release.apk
 ```
+
+### Android Signing In CI
+
+Repository secrets required for signed APK publishing:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Workflow `Android APK Release Asset` decodes keystore, builds signed release APK, verifies signature, and uploads it as `Connzect-latest.apk`.
 
 ## Desktop (.exe) Build
 

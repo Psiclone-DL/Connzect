@@ -27,6 +27,24 @@ Output:
 
 - `android/app/build/outputs/apk/release/app-release.apk`
 
+## Signed release APK (required for install)
+
+Unsigned APKs are often rejected by Android with messages like "package appears to be invalid".
+
+For release install builds, configure signing in CI via GitHub repo secrets:
+
+- `ANDROID_KEYSTORE_BASE64`: base64 of your `.jks` keystore file
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+The workflow `Android APK Release Asset` now:
+
+1. Decodes keystore from secrets
+2. Builds a signed `assembleRelease` APK
+3. Verifies signature with `apksigner verify`
+4. Uploads to GitHub Release as `Connzect-latest.apk`
+
 For local testing you can also build debug:
 
 ```bash
