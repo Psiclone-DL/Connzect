@@ -70,8 +70,8 @@ jobs:
           ANDROIDAPP_KEY_PASSWORD: ${{ secrets.ANDROIDAPP_KEY_PASSWORD }}
         run: |
           mkdir -p android/signing
-          KEYSTORE_PATH="android/signing/release-keystore.jks"
-          SECRET_KEYSTORE_PATH="android/signing/release-keystore-from-secret.jks"
+          KEYSTORE_PATH="$GITHUB_WORKSPACE/android/signing/release-keystore.jks"
+          SECRET_KEYSTORE_PATH="$GITHUB_WORKSPACE/android/signing/release-keystore-from-secret.jks"
           DEFAULT_PASSWORD="ConnzectReleaseKey2026"
           if [ -n "$GITHUB_REPOSITORY_ID" ]; then
             DEFAULT_PASSWORD="Connzect${GITHUB_REPOSITORY_ID}Key2026"
