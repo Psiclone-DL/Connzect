@@ -58,21 +58,45 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROIDAPP: ${{ secrets.ANDROIDAPP }}
+          ANDROIDAPP_KEYSTORE_PASSWORD: ${{ secrets.ANDROIDAPP_KEYSTORE_PASSWORD }}
+          ANDROIDAPP_KEY_ALIAS: ${{ secrets.ANDROIDAPP_KEY_ALIAS }}
+          ANDROIDAPP_KEY_PASSWORD: ${{ secrets.ANDROIDAPP_KEY_PASSWORD }}
         run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
-            echo "Missing one or more Android signing secrets."
-            echo "Required: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD"
+          KEYSTORE_BASE64="$ANDROID_KEYSTORE_BASE64"
+          KEYSTORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+          KEY_ALIAS="$ANDROID_KEY_ALIAS"
+          KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
+
+          if [ -z "$KEYSTORE_BASE64" ] && [ -n "$ANDROIDAPP" ]; then
+            KEYSTORE_BASE64="$ANDROIDAPP"
+          fi
+          if [ -z "$KEYSTORE_PASSWORD" ] && [ -n "$ANDROIDAPP_KEYSTORE_PASSWORD" ]; then
+            KEYSTORE_PASSWORD="$ANDROIDAPP_KEYSTORE_PASSWORD"
+          fi
+          if [ -z "$KEY_ALIAS" ] && [ -n "$ANDROIDAPP_KEY_ALIAS" ]; then
+            KEY_ALIAS="$ANDROIDAPP_KEY_ALIAS"
+          fi
+          if [ -z "$KEY_PASSWORD" ] && [ -n "$ANDROIDAPP_KEY_PASSWORD" ]; then
+            KEY_PASSWORD="$ANDROIDAPP_KEY_PASSWORD"
+          fi
+
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Missing Android signing secrets."
+            echo "Supported secret sets:"
+            echo "1) ANDROID_KEYSTORE_BASE64 + ANDROID_KEYSTORE_PASSWORD + ANDROID_KEY_ALIAS + ANDROID_KEY_PASSWORD"
+            echo "2) ANDROIDAPP + ANDROIDAPP_KEYSTORE_PASSWORD + ANDROIDAPP_KEY_ALIAS + ANDROIDAPP_KEY_PASSWORD"
             exit 1
           fi
 
           mkdir -p android/signing
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/signing/release-keystore.jks
+          echo "$KEYSTORE_BASE64" | base64 -d > android/signing/release-keystore.jks
 
           {
             echo "CONNZECT_ANDROID_KEYSTORE_PATH=android/signing/release-keystore.jks"
-            echo "CONNZECT_ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
-            echo "CONNZECT_ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS"
-            echo "CONNZECT_ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
+            echo "CONNZECT_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "CONNZECT_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "CONNZECT_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
           } >> "$GITHUB_ENV"
 
       - name: Build release APK
