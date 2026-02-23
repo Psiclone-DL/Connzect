@@ -17,8 +17,11 @@ Usage:
 
 What it does:
   1) (optional) commits current changes
-  2) pushes to origin/<branch>
-  3) rebuilds and restarts backend/frontend/nginx with Docker Compose
+  2) builds backend + frontend workspaces
+  3) builds Android release APK
+  4) pushes to origin/<branch>
+  5) prepares frontend downloads (APK/Installer)
+  6) rebuilds and restarts backend/frontend/nginx with Docker Compose
 EOF
 }
 
@@ -31,6 +34,21 @@ require_cmd() {
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
   fi
+}
+
+build_android_apk() {
+  if [[ ! -d "$ROOT_DIR/android" ]]; then
+    log "Android project not found, skipping APK build"
+    return
+  fi
+
+  if [[ -x "$ROOT_DIR/android/gradlew" ]]; then
+    (cd "$ROOT_DIR/android" && ./gradlew assembleRelease)
+    return
+  fi
+
+  require_cmd gradle
+  (cd "$ROOT_DIR/android" && gradle assembleRelease)
 }
 
 while [[ $# -gt 0 ]]; do
@@ -59,6 +77,7 @@ done
 require_cmd git
 require_cmd docker
 require_cmd node
+require_cmd npm
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   printf 'Not a git repository: %s\n' "$ROOT_DIR" >&2
@@ -98,11 +117,25 @@ if [[ "$AUTO_COMMIT" == "1" ]]; then
   fi
 fi
 
+log "Building backend workspace"
+npm run build --workspace backend
+
+log "Building frontend workspace"
+npm run build --workspace frontend
+
+log "Building Android APK (release)"
+build_android_apk
+
 log "Pushing branch $BRANCH to origin"
 git push origin "$BRANCH"
 
 log "Preparing downloadable artifacts (APK/Installer) for frontend"
-npm run prepare:downloads
+APK_PATH="$ROOT_DIR/android/app/build/outputs/apk/release/app-release.apk"
+if [[ -f "$APK_PATH" ]]; then
+  npm run prepare:downloads -- --apk "$APK_PATH"
+else
+  npm run prepare:downloads
+fi
 
 log "Deploying containers (backend, frontend, nginx)"
 docker compose -f docker-compose.yml up -d --build backend frontend nginx

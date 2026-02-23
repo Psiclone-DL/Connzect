@@ -17,6 +17,7 @@ import type {
   Channel,
   ConnzectServer,
   DirectConversation,
+  Invite,
   Message,
   Role,
   ServerDetails,
@@ -82,6 +83,24 @@ const parsePermissionValue = (value?: string): bigint => {
 const compareBigIntDesc = (left: bigint, right: bigint): number => {
   if (left === right) return 0;
   return left > right ? -1 : 1;
+};
+
+const isInviteExpired = (invite: Invite): boolean => {
+  if (!invite.expiresAt) return false;
+  const expiresAt = new Date(invite.expiresAt).getTime();
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+};
+
+const isInviteUsageLimitReached = (invite: Invite): boolean =>
+  invite.maxUses !== null && invite.maxUses !== undefined && invite.uses >= invite.maxUses;
+
+const isInviteAvailable = (invite: Invite): boolean => !invite.revokedAt && !isInviteExpired(invite) && !isInviteUsageLimitReached(invite);
+
+const formatDateTime = (value?: string | null): string => {
+  if (!value) return 'Never';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
 };
 
 const toAudioLabel = (device: MediaDeviceInfo, fallbackPrefix: 'Microphone' | 'Speaker', index: number): string => {
@@ -282,6 +301,13 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [serverSettingsName, setServerSettingsName] = useState('');
   const [serverSettingsIconFile, setServerSettingsIconFile] = useState<File | null>(null);
   const [isSavingServerSettings, setIsSavingServerSettings] = useState(false);
+  const [inviteManagerOpen, setInviteManagerOpen] = useState(false);
+  const [inviteManagerServer, setInviteManagerServer] = useState<ConnzectServer | null>(null);
+  const [serverInvites, setServerInvites] = useState<Invite[]>([]);
+  const [isLoadingServerInvites, setIsLoadingServerInvites] = useState(false);
+  const [isCreatingServerInvite, setIsCreatingServerInvite] = useState(false);
+  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
+  const [inviteManagerError, setInviteManagerError] = useState<string | null>(null);
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleMentionable, setNewRoleMentionable] = useState(true);
   const [newRolePermissions, setNewRolePermissions] = useState<RolePermissionDraft>({
@@ -718,6 +744,15 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   }, [activeServerId, servers]);
 
   useEffect(() => {
+    if (!inviteManagerServer) return;
+    if (servers.some((server) => server.id === inviteManagerServer.id)) return;
+    setInviteManagerOpen(false);
+    setInviteManagerServer(null);
+    setServerInvites([]);
+    setInviteManagerError(null);
+  }, [inviteManagerServer, servers]);
+
+  useEffect(() => {
     if (!activeServerId) return;
     const selected = servers.find((server) => server.id === activeServerId);
     if (!selected) return;
@@ -961,6 +996,14 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     if (activeServer.ownerId === user.id) return true;
     return hasPermissionFlag(currentMemberPermissions, SERVER_PERMISSION_FLAGS.manageServer);
   }, [activeServer, currentMemberPermissions, user]);
+  const availableServerInvites = useMemo(
+    () => serverInvites.filter((invite) => isInviteAvailable(invite)),
+    [serverInvites]
+  );
+  const inactiveServerInviteCount = useMemo(
+    () => Math.max(0, serverInvites.length - availableServerInvites.length),
+    [availableServerInvites.length, serverInvites.length]
+  );
   const categoryChannels = useMemo(
     () => channels.filter((channel) => channel.type === 'CATEGORY').sort((left, right) => left.position - right.position),
     [channels]
@@ -2054,6 +2097,76 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to join invite');
     } finally {
       setIsJoiningInvite(false);
+    }
+  };
+
+  const buildInviteLink = (code: string): string => {
+    if (typeof window === 'undefined') return code;
+    return `${window.location.origin}/invite/${code}`;
+  };
+
+  const loadServerInvites = async (serverId: string) => {
+    setIsLoadingServerInvites(true);
+    setInviteManagerError(null);
+    try {
+      const loaded = await authRequest<Invite[]>(`/servers/${serverId}/invites`);
+      setServerInvites(loaded);
+      setError(null);
+    } catch (nextError) {
+      setInviteManagerError(nextError instanceof Error ? nextError.message : 'Failed to load invite links');
+      setServerInvites([]);
+    } finally {
+      setIsLoadingServerInvites(false);
+    }
+  };
+
+  const openInviteManager = async (server: ConnzectServer) => {
+    if (activeServerId !== server.id) {
+      openServerWidget(server.id);
+    }
+    setInviteManagerServer(server);
+    setInviteManagerOpen(true);
+    await loadServerInvites(server.id);
+  };
+
+  const createNewInvite = async () => {
+    if (!inviteManagerServer || isCreatingServerInvite) return;
+
+    setIsCreatingServerInvite(true);
+    setInviteManagerError(null);
+    try {
+      const created = await authRequest<Invite>(`/servers/${inviteManagerServer.id}/invites`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      setServerInvites((previous) => [created, ...previous]);
+      await copyValue(buildInviteLink(created.code), 'Invite link');
+      setError(null);
+    } catch (nextError) {
+      setInviteManagerError(nextError instanceof Error ? nextError.message : 'Failed to create invite');
+    } finally {
+      setIsCreatingServerInvite(false);
+    }
+  };
+
+  const revokeInvite = async (invite: Invite) => {
+    if (!inviteManagerServer || revokingInviteId) return;
+    if (!window.confirm(`Revoke invite code "${invite.code}"?`)) return;
+
+    setRevokingInviteId(invite.id);
+    setInviteManagerError(null);
+    try {
+      await authRequest(`/servers/${inviteManagerServer.id}/invites/${invite.id}`, {
+        method: 'DELETE'
+      });
+      setServerInvites((previous) =>
+        previous.map((entry) => (entry.id === invite.id ? { ...entry, revokedAt: new Date().toISOString() } : entry))
+      );
+      setError(null);
+    } catch (nextError) {
+      setInviteManagerError(nextError instanceof Error ? nextError.message : 'Failed to revoke invite');
+    } finally {
+      setRevokingInviteId(null);
     }
   };
 
@@ -3151,6 +3264,17 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                 <button
                   type="button"
                   onClick={() => {
+                    void openInviteManager(contextMenu.server);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                >
+                  <span>Invite links</span>
+                  <span className="text-xs text-slate-400">Codes</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     void leaveServer(contextMenu.server);
                     setContextMenu(null);
                   }}
@@ -3678,6 +3802,122 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   </div>
                 </div>
               )}
+            </section>
+          </div>
+        ) : null}
+
+        {user && inviteManagerOpen && inviteManagerServer ? (
+          <div className="fixed inset-0 z-[74] flex items-center justify-center p-4">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => {
+                setInviteManagerOpen(false);
+                setInviteManagerServer(null);
+                setServerInvites([]);
+                setInviteManagerError(null);
+              }}
+              aria-label="Close invite manager"
+            />
+            <section className={cn(styles.surfaceStrong, styles.fadeIn, 'relative z-[75] w-full max-w-3xl rounded-3xl border p-5')}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-emerald-100/70">Invite Links</p>
+                  <h3 className="mt-2 text-xl font-semibold text-white">{inviteManagerServer.name}</h3>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/10"
+                  onClick={() => {
+                    setInviteManagerOpen(false);
+                    setInviteManagerServer(null);
+                    setServerInvites([]);
+                    setInviteManagerError(null);
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-slate-300">
+                  Active invites: <span className="font-semibold text-emerald-100">{availableServerInvites.length}</span>
+                  {inactiveServerInviteCount > 0 ? (
+                    <span className="text-slate-400"> ({inactiveServerInviteCount} inactive)</span>
+                  ) : null}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="soft"
+                    disabled={isLoadingServerInvites}
+                    onClick={() => void loadServerInvites(inviteManagerServer.id)}
+                  >
+                    {isLoadingServerInvites ? 'Refreshing...' : 'Refresh'}
+                  </Button>
+                  <Button type="button" variant="soft" disabled={isCreatingServerInvite} onClick={() => void createNewInvite()}>
+                    {isCreatingServerInvite ? 'Creating...' : 'Create New Invite'}
+                  </Button>
+                </div>
+              </div>
+
+              {inviteManagerError ? <p className="mt-3 text-sm text-red-300">{inviteManagerError}</p> : null}
+
+              <div className="soft-scroll mt-4 max-h-[50vh] space-y-3 overflow-y-auto pr-1">
+                {isLoadingServerInvites ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-300">Loading invite links...</div>
+                ) : availableServerInvites.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-white/20 bg-black/20 p-4 text-sm text-slate-300">
+                    No active invite links. Create a new one.
+                  </div>
+                ) : (
+                  availableServerInvites.map((invite) => {
+                    const inviteLink = buildInviteLink(invite.code);
+                    const usesLabel =
+                      invite.maxUses === null || invite.maxUses === undefined
+                        ? `${invite.uses} uses`
+                        : `${invite.uses}/${invite.maxUses} uses`;
+
+                    return (
+                      <article key={invite.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-mono text-xs text-emerald-100">{invite.code}</p>
+                          <span className="rounded-lg border border-emerald-300/25 bg-emerald-300/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-emerald-100">
+                            Active
+                          </span>
+                        </div>
+                        <p className="mt-2 break-all text-xs text-slate-300">{inviteLink}</p>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Uses</p>
+                            <p className="mt-1">{usesLabel}</p>
+                          </div>
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Expires</p>
+                            <p className="mt-1">{invite.expiresAt ? formatDateTime(invite.expiresAt) : 'Never'}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                          <Button type="button" variant="soft" onClick={() => void copyValue(invite.code, 'Invite code')}>
+                            Copy Code
+                          </Button>
+                          <Button type="button" variant="soft" onClick={() => void copyValue(inviteLink, 'Invite link')}>
+                            Copy Link
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            disabled={revokingInviteId === invite.id}
+                            onClick={() => void revokeInvite(invite)}
+                          >
+                            {revokingInviteId === invite.id ? 'Revoking...' : 'Revoke'}
+                          </Button>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+              </div>
             </section>
           </div>
         ) : null}

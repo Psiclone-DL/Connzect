@@ -4,6 +4,7 @@ import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
 import { routeParam } from '../../utils/params';
 import { Permission } from '../../utils/permissions';
+import { pickInviteCode } from '../invites/invite-code';
 import { requireServerPermission } from './server-access';
 
 const serializeRole = <T extends { permissions: bigint }>(role: T) => ({
@@ -56,6 +57,15 @@ export const createServer = async (req: Request, res: Response): Promise<void> =
         { serverId: server.id, name: 'general', type: 'TEXT', position: 0 },
         { serverId: server.id, name: 'lounge', type: 'VOICE', position: 1 }
       ]
+    });
+
+    const inviteCode = await pickInviteCode(tx);
+    await tx.invite.create({
+      data: {
+        code: inviteCode,
+        serverId: server.id,
+        createdById: req.user!.id
+      }
     });
 
     return server;
