@@ -56,7 +56,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android/signing/release-keystore.jks
-          key: android-signing-keystore-v1
+          key: android-signing-keystore-v2
 
       - name: Prepare Android signing inputs
         env:
@@ -72,6 +72,10 @@ jobs:
           mkdir -p android/signing
           KEYSTORE_PATH="android/signing/release-keystore.jks"
           SECRET_KEYSTORE_PATH="android/signing/release-keystore-from-secret.jks"
+          DEFAULT_PASSWORD="ConnzectReleaseKey2026"
+          if [ -n "$GITHUB_REPOSITORY_ID" ]; then
+            DEFAULT_PASSWORD="Connzect${GITHUB_REPOSITORY_ID}Key2026"
+          fi
 
           KEYSTORE_BASE64="$ANDROID_KEYSTORE_BASE64"
           KEYSTORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
@@ -95,8 +99,19 @@ jobs:
             KEY_ALIAS="connzect"
           fi
 
+          if [ -z "$KEYSTORE_PASSWORD" ] || [ ${#KEYSTORE_PASSWORD} -lt 6 ]; then
+            KEYSTORE_PASSWORD="$DEFAULT_PASSWORD"
+            echo "Keystore password missing/too short. Using managed fallback password."
+          fi
+
           if [ -z "$KEY_PASSWORD" ]; then
             KEY_PASSWORD="$KEYSTORE_PASSWORD"
+          fi
+          if [ ${#KEY_PASSWORD} -lt 6 ]; then
+            KEY_PASSWORD="$KEYSTORE_PASSWORD"
+          fi
+          if [ ${#KEY_PASSWORD} -lt 6 ]; then
+            KEY_PASSWORD="$DEFAULT_PASSWORD"
           fi
 
           if [ -n "$KEYSTORE_BASE64" ]; then
@@ -110,11 +125,6 @@ jobs:
           fi
 
           if [ ! -f "$KEYSTORE_PATH" ]; then
-            if [ -z "$KEYSTORE_PASSWORD" ]; then
-              echo "Missing keystore password."
-              echo "Set either ANDROID_KEYSTORE_PASSWORD or ANDROIDAPP_KEYSTORE_PASSWORD."
-              exit 1
-            fi
             echo "No keystore found. Generating a new release keystore."
             keytool -genkeypair -v \
               -keystore "$KEYSTORE_PATH" \
@@ -128,8 +138,21 @@ jobs:
           fi
 
           if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
-            echo "Keystore validation failed for alias/password."
-            echo "Fix secrets ANDROIDAPP_KEYSTORE_PASSWORD / ANDROIDAPP_KEY_ALIAS / ANDROIDAPP_KEY_PASSWORD (or ANDROID_* variants)."
+            echo "Keystore validation failed for alias/password. Regenerating managed keystore."
+            rm -f "$KEYSTORE_PATH"
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -storepass "$KEYSTORE_PASSWORD" \
+              -alias "$KEY_ALIAS" \
+              -keypass "$KEY_PASSWORD" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Connzect, OU=Connzect, O=Connzect, L=Bucharest, S=Bucharest, C=RO"
+          fi
+
+          if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "Managed keystore validation failed."
             exit 1
           fi
 

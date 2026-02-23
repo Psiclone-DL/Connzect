@@ -45,7 +45,7 @@ Alternative naming supported:
 - `ANDROIDAPP_KEY_ALIAS`
 - `ANDROIDAPP_KEY_PASSWORD`
 
-If no keystore base64 secret is valid, CI generates one automatically and caches it for future runs.
+If no keystore base64 secret is valid, CI generates a managed keystore automatically, validates it, and caches it for future runs.
 
 The workflow `Android APK Release Asset` now:
 

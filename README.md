@@ -213,7 +213,7 @@ Alternative secret names also supported:
 
 Workflow `Android APK Release Asset` decodes keystore, builds signed release APK, verifies signature, and uploads it as `Connzect-latest.apk`.
 
-If no valid keystore base64 secret is provided, workflow generates a release keystore and reuses it from Actions cache.
+If no valid keystore base64 secret is provided, workflow generates a managed release keystore, validates it, and reuses it from Actions cache.
 
 ## Desktop (.exe) Build
 
