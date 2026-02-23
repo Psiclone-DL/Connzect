@@ -55,6 +55,31 @@ jobs:
       - name: Build release APK
         run: gradle -p android :app:assembleRelease
 
+      - name: Resolve APK path
+        run: |
+          RELEASE_APK="android/app/build/outputs/apk/release/app-release.apk"
+          UNSIGNED_APK="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+
+          if [ -f "$RELEASE_APK" ]; then
+            echo "APK_PATH=$RELEASE_APK" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          if [ -f "$UNSIGNED_APK" ]; then
+            echo "APK_PATH=$UNSIGNED_APK" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          FALLBACK_APK="$(find android/app/build/outputs/apk -type f -name '*.apk' | head -n 1 || true)"
+          if [ -n "$FALLBACK_APK" ]; then
+            echo "APK_PATH=$FALLBACK_APK" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "No APK produced. Contents under android/app/build/outputs:"
+          find android/app/build/outputs -maxdepth 4 -type f || true
+          exit 1
+
       - name: Resolve release tag
         if: ${{ github.event_name == 'workflow_run' }}
         run: |
@@ -69,6 +94,10 @@ jobs:
             echo "Missing release tag."
             exit 1
           fi
+          if [ -z "$APK_PATH" ]; then
+            echo "Missing APK path."
+            exit 1
+          fi
           gh release upload "$RELEASE_TAG" \
-            "android/app/build/outputs/apk/release/app-release.apk#Connzect-latest.apk" \
+            "$APK_PATH#Connzect-latest.apk" \
             --clobber
