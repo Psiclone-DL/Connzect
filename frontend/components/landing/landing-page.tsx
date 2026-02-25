@@ -167,32 +167,6 @@ const VoiceParticipantAvatar = ({ participant }: { participant: VoiceParticipant
   const showMicBadge = participant.isMicMuted;
   const showSoundBadge = participant.isOutputMuted;
 
-  const MicBadge = () => (
-    <span
-      aria-hidden="true"
-      className="flex h-4 w-4 items-center justify-center rounded-full border border-white/30 bg-black/70 text-[10px] text-emerald-100"
-    >
-      <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.25">
-        <path d="M8 3.25a2.5 2.5 0 0 1 2.5 2.5v2a2.5 2.5 0 1 1-5 0v-2A2.5 2.5 0 0 1 8 3.25z" />
-        <path strokeLinecap="round" d="M7 10.75v2.5m2-2.5v2.5" />
-        <line x1="4.5" y1="4.5" x2="11.5" y2="11.5" strokeLinecap="round" />
-      </svg>
-    </span>
-  );
-
-  const SoundBadge = () => (
-    <span
-      aria-hidden="true"
-      className="flex h-4 w-4 items-center justify-center rounded-full border border-white/30 bg-black/70 text-[10px] text-amber-200"
-    >
-      <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.25">
-        <path d="M4.5 6.5h2.4l2.1-2.5v6l-2.1-2.5H4.5z" />
-        <path strokeLinecap="round" d="M10 5.5a3.5 3.5 0 0 1 0 5" />
-        <line x1="3.5" y1="12.5" x2="12.5" y2="3.5" strokeLinecap="round" />
-      </svg>
-    </span>
-  );
-
   return (
     <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center">
       {avatarUrl ? (
@@ -212,9 +186,21 @@ const VoiceParticipantAvatar = ({ participant }: { participant: VoiceParticipant
         </span>
       )}
       {(showMicBadge || showSoundBadge) && (
-        <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1 flex gap-0.5">
-          {showMicBadge ? <MicBadge /> : null}
-          {showSoundBadge ? <SoundBadge /> : null}
+        <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/80 text-white text-[9px]">
+          <span className="flex items-center gap-1">
+            {showMicBadge ? (
+              <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.3">
+                <path d="M8 3a2.5 2.5 0 0 1 2.5 2.5v2a2.5 2.5 0 1 1-5 0v-2A2.5 2.5 0 0 1 8 3z" />
+                <path strokeLinecap="round" d="M7 10v2m2-2v2" />
+              </svg>
+            ) : null}
+            {showSoundBadge ? (
+              <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.3">
+                <path d="M4.5 6h2.4l2.1-2.4v6L6.9 8H4.5z" />
+                <path strokeLinecap="round" d="M10 5.5a3.5 3.5 0 0 1 0 5" />
+              </svg>
+            ) : null}
+          </span>
         </span>
       )}
       {overlayClasses ? (
