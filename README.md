@@ -411,3 +411,15 @@ Base URL: `http://localhost:4000/api`
 - Add unit/integration tests for auth and permission checks.
 - Add object storage (S3-compatible) for server icons.
 - Add TURN servers for reliable NAT traversal in voice.
+- Add TLS certificates to `nginx/ssl` and point `nginx.conf` at them for HTTPS.
+
+### Temporary HTTPS for testing
+
+The repo now ships with a self-signed certificate under `nginx/certs/self-signed.{crt,key}` and nginx listens on `443` while port `80` redirects to HTTPS. This is only meant for local or staging smoke tests. Replace the files or bind-mount a real certificate/key pair into `nginx/certs` (or update `nginx.conf`) before exposing the stack to the public internet. For quick regeneration, run:
+
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout nginx/certs/self-signed.key \
+  -out nginx/certs/self-signed.crt \
+  -subj "/CN=localhost"
+```
