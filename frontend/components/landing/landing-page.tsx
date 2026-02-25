@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { resolveAssetUrl } from '@/lib/assets';
+import { playVoiceCue } from '@/lib/audio/voice-cues';
 import { useSocket } from '@/hooks/use-socket';
 import type {
   Channel,
@@ -107,6 +108,77 @@ const toAudioLabel = (device: MediaDeviceInfo, fallbackPrefix: 'Microphone' | 'S
   const trimmed = device.label.trim();
   if (trimmed) return trimmed;
   return `${fallbackPrefix} ${index + 1}`;
+};
+
+const ScreenShareTile = ({
+  stream,
+  label,
+  subtitle
+}: {
+  stream: MediaStream;
+  label: string;
+  subtitle?: string;
+}) => {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+    videoRef.current.srcObject = stream;
+  }, [stream]);
+
+  return (
+    <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+      <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-3 pt-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-emerald-100/90">{label}</p>
+        {subtitle ? <p className="text-xs text-slate-200">{subtitle}</p> : null}
+      </div>
+    </div>
+  );
+};
+
+
+const getVoiceParticipantOverlayClasses = (participant: VoiceParticipant): string | null => {
+  if (!participant.isMicMuted && !participant.isOutputMuted) {
+    return null;
+  }
+  if (participant.isMicMuted) {
+    return 'border-rose-400/80 bg-rose-500/25';
+  }
+  return 'border-slate-400/80 bg-slate-900/40';
+};
+
+const VoiceParticipantAvatar = ({ participant }: { participant: VoiceParticipant }) => {
+  const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
+  const overlayClasses = getVoiceParticipantOverlayClasses(participant);
+  const initial = participant.displayName.trim().charAt(0).toUpperCase() || '?';
+
+  return (
+    <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center">
+      {avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={avatarUrl}
+          alt={participant.displayName}
+          title={participant.displayName}
+          className="h-full w-full rounded-full border border-white/20 object-cover"
+        />
+      ) : (
+        <span
+          title={participant.displayName}
+          className="flex h-full w-full items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
+        >
+          {initial}
+        </span>
+      )}
+      {overlayClasses ? (
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-0 rounded-full border-2 ${overlayClasses}`}
+        />
+      ) : null}
+    </span>
+  );
 };
 
 const ROLE_PERMISSION_FLAGS = {
@@ -241,6 +313,18 @@ type DragOverTarget =
   | { kind: 'channel'; id: string }
   | { kind: 'uncategorized' };
 
+type RemoteScreenShareEntry = {
+  socketId: string;
+  stream: MediaStream;
+};
+
+type ScreenSharePreview = {
+  key: string;
+  stream: MediaStream;
+  label: string;
+  subtitle?: string;
+};
+
 type AudioDeviceOption = {
   id: string;
   label: string;
@@ -284,6 +368,10 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [connectedVoiceChannelId, setConnectedVoiceChannelId] = useState('');
   const [connectedVoiceChannelName, setConnectedVoiceChannelName] = useState('');
   const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
+  const [shareStream, setShareStream] = useState<MediaStream | null>(null);
+  const [sharePending, setSharePending] = useState(false);
+  const [shareScreenError, setShareScreenError] = useState<string | null>(null);
+  const [remoteScreenShares, setRemoteScreenShares] = useState<RemoteScreenShareEntry[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [threadParent, setThreadParent] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
@@ -363,6 +451,31 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       ...voiceParticipants
     ];
   }, [isMicMuted, isOutputMuted, isVoiceConnected, user, voiceParticipants]);
+  const sharePreviews = useMemo(() => {
+    const entries: ScreenSharePreview[] = [];
+    if (shareStream) {
+      entries.push({
+        key: 'local',
+        stream: shareStream,
+        label: 'You are sharing',
+        subtitle: 'Your screen is visible to the voice channel'
+      });
+    }
+
+    remoteScreenShares.forEach((share) => {
+      const participant = voiceParticipants.find((participant) => participant.socketId === share.socketId);
+      const label = participant ? `${participant.displayName} is sharing` : 'Participant is sharing';
+      const subtitle = participant ? undefined : 'Unknown participant';
+      entries.push({
+        key: share.socketId,
+        stream: share.stream,
+        label,
+        subtitle
+      });
+    });
+
+    return entries;
+  }, [remoteScreenShares, shareStream, voiceParticipants]);
   const accountAvatarUrl = useMemo(() => resolveAssetUrl(user?.avatarUrl ?? null), [user?.avatarUrl]);
   const accountInitial = useMemo(() => user?.displayName.trim().charAt(0).toUpperCase() || '?', [user?.displayName]);
   const serverOrderStorageKey = useMemo(
@@ -911,7 +1024,74 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     setVoiceParticipants([]);
     setIsSharingScreen(false);
     setIsVoiceSettingsOpen(false);
+    setRemoteScreenShares([]);
   }, [isVoiceConnected]);
+
+  useEffect(() => {
+    if (!isSharingScreen) {
+      setShareScreenError(null);
+      setSharePending(false);
+      setShareStream((previous) => {
+        previous?.getTracks().forEach((track) => track.stop());
+        return null;
+      });
+      return;
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia) {
+      setShareScreenError('Screen sharing is not supported in this browser.');
+      setIsSharingScreen(false);
+      return;
+    }
+
+    let cancelled = false;
+    const startShare = async () => {
+      setSharePending(true);
+      setShareScreenError(null);
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        stream.getVideoTracks().forEach((track) => {
+          const handleEnded = () => {
+            setIsSharingScreen(false);
+            track.removeEventListener('ended', handleEnded);
+          };
+          track.addEventListener('ended', handleEnded);
+        });
+
+        setShareStream(stream);
+      } catch (nextError) {
+        if (!cancelled) {
+          setShareScreenError(nextError instanceof Error ? nextError.message : 'Screen share failed or was canceled.');
+          setIsSharingScreen(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setSharePending(false);
+        }
+      }
+    };
+
+    startShare();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSharingScreen]);
+
+  useEffect(() => {
+    if (!isVoiceConnected) return;
+    playVoiceCue(isMicMuted ? 'mic-muted' : 'mic-unmuted');
+  }, [isMicMuted, isVoiceConnected]);
+
+  useEffect(() => {
+    if (!isVoiceConnected) return;
+    playVoiceCue(isOutputMuted ? 'sound-muted' : 'sound-unmuted');
+  }, [isOutputMuted, isVoiceConnected]);
 
   useEffect(() => {
     if (!activeChatChannelId || !activeChatChannel || activeChatChannel.type !== 'TEXT') {
@@ -2478,10 +2658,16 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                           aria-label="Share screen"
                           title="Share screen"
                           aria-pressed={isSharingScreen}
-                          onClick={() => setIsSharingScreen((current) => !current)}
+                          onClick={() => {
+                            if (sharePending || !canShowVoiceActions) return;
+                            setShareScreenError(null);
+                            setIsSharingScreen((current) => !current);
+                          }}
+                          disabled={sharePending || !canShowVoiceActions}
                           className={cn(
                             'inline-flex h-8 w-8 items-center justify-center rounded-lg border text-slate-100 transition',
-                            isSharingScreen ? 'border-emerald-200/40 bg-emerald-300/20' : 'border-white/15 bg-white/5 hover:bg-white/10'
+                            isSharingScreen ? 'border-emerald-200/40 bg-emerald-300/20' : 'border-white/15 bg-white/5',
+                            sharePending || !canShowVoiceActions ? 'cursor-not-allowed opacity-60' : 'hover:bg-white/10'
                           )}
                         >
                           <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2746,8 +2932,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               {draggedChannelId === category.id ? <span className="text-[10px] text-emerald-100/70">Moving</span> : null}
                             </button>
 
-                            {!categoryCollapsed
-                              ? categoryItems.map((channel) => (
+                            {!categoryCollapsed && (
+                              <>
+                                {categoryItems.map((channel) => (
                                   <div key={channel.id} className="space-y-1 pl-3">
                                     <button
                                       type="button"
@@ -2819,32 +3006,18 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                     connectedVoiceChannelId === channel.id &&
                                     displayedVoiceParticipants.length > 0 ? (
                                       <div className="flex items-center gap-1.5 px-2">
-                                        {displayedVoiceParticipants.map((participant) => {
-                                          const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
-                                          return avatarUrl ? (
-                                            // eslint-disable-next-line @next/next/no-img-element
-                                            <img
-                                              key={participant.socketId}
-                                              src={avatarUrl}
-                                              alt={participant.displayName}
-                                              title={participant.displayName}
-                                              className="h-6 w-6 rounded-full border border-white/20 object-cover"
-                                            />
-                                          ) : (
-                                            <span
-                                              key={participant.socketId}
-                                              title={participant.displayName}
-                                              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
-                                            >
-                                              {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
-                                            </span>
-                                          );
-                                        })}
+                                        {displayedVoiceParticipants.map((participant) => (
+                                          <VoiceParticipantAvatar
+                                            key={participant.socketId}
+                                            participant={participant}
+                                          />
+                                        ))}
                                       </div>
                                     ) : null}
                                   </div>
-                                ))
-                              : null}
+                                ))}
+                              </>
+                            )}
                           </section>
                         );
                       })}
@@ -2945,27 +3118,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               connectedVoiceChannelId === channel.id &&
                               displayedVoiceParticipants.length > 0 ? (
                                 <div className="flex items-center gap-1.5 px-2">
-                                  {displayedVoiceParticipants.map((participant) => {
-                                    const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
-                                    return avatarUrl ? (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img
-                                        key={participant.socketId}
-                                        src={avatarUrl}
-                                        alt={participant.displayName}
-                                        title={participant.displayName}
-                                        className="h-6 w-6 rounded-full border border-white/20 object-cover"
-                                      />
-                                    ) : (
-                                      <span
-                                        key={participant.socketId}
-                                        title={participant.displayName}
-                                        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
-                                      >
-                                        {participant.displayName.trim().charAt(0).toUpperCase() || '?'}
-                                      </span>
-                                    );
-                                  })}
+                                  {displayedVoiceParticipants.map((participant) => (
+                                    <VoiceParticipantAvatar
+                                      key={participant.socketId}
+                                      participant={participant}
+                                    />
+                                  ))}
                                 </div>
                               ) : null}
                             </div>
@@ -2992,8 +3150,44 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                           preferredInputDeviceId={selectedAudioInputId || undefined}
                           preferredOutputDeviceId={selectedAudioOutputId || undefined}
                           onParticipantsChange={setVoiceParticipants}
+                          sharedScreenStream={shareStream}
+                          onRemoteScreenShareChange={setRemoteScreenShares}
                         />
                       </div>
+                    ) : null}
+
+                    {isVoiceConnected && (sharePreviews.length > 0 || shareScreenError) ? (
+                      <section className="mb-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <div className="flex flex-wrap items-end justify-between gap-2">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.24em] text-slate-400">Screen share</p>
+                            <p className="text-sm font-semibold text-white">Live visual feed</p>
+                          </div>
+                          <p className="text-[10px] text-slate-400">
+                            {connectedVoiceChannelName ? `Channel: ${connectedVoiceChannelName}` : 'Voice channel'}
+                          </p>
+                        </div>
+                        {sharePending ? (
+                          <p className="mt-2 text-xs text-emerald-200">Waiting for permission to share your screen...</p>
+                        ) : null}
+                        {sharePreviews.length > 0 ? (
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            {sharePreviews.map((preview) => (
+                              <ScreenShareTile
+                                key={preview.key}
+                                stream={preview.stream}
+                                label={preview.label}
+                                subtitle={preview.subtitle}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-xs text-slate-400">No screen share is currently active.</p>
+                        )}
+                        {shareScreenError ? (
+                          <p className="mt-2 text-xs text-red-300">{shareScreenError}</p>
+                        ) : null}
+                      </section>
                     ) : null}
                     {activeChannel ? (
                       <>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { VoiceEventPayload, VoiceParticipant } from '@/types';
 import { resolveAssetUrl } from '@/lib/assets';
+import { playVoiceCue, unlockSharedAudioContext } from '@/lib/audio/voice-cues';
 
 type SignalType = 'offer' | 'answer' | 'ice-candidate';
 
@@ -11,6 +12,11 @@ type SignalPayload = {
   fromSocketId: string;
   type: SignalType;
   data: unknown;
+};
+
+type RemoteScreenShare = {
+  socketId: string;
+  stream: MediaStream;
 };
 
 interface VoiceRoomProps {
@@ -21,6 +27,8 @@ interface VoiceRoomProps {
   preferredInputDeviceId?: string;
   preferredOutputDeviceId?: string;
   onParticipantsChange?: (participants: VoiceParticipant[]) => void;
+  sharedScreenStream?: MediaStream | null;
+  onRemoteScreenShareChange?: (shares: RemoteScreenShare[]) => void;
 }
 
 const rtcConfig: RTCConfiguration = {
@@ -34,7 +42,9 @@ export const VoiceRoom = ({
   isOutputMuted = false,
   preferredInputDeviceId,
   preferredOutputDeviceId,
-  onParticipantsChange
+  onParticipantsChange,
+  sharedScreenStream,
+  onRemoteScreenShareChange
 }: VoiceRoomProps) => {
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -43,33 +53,61 @@ export const VoiceRoom = ({
   const outputMutedRef = useRef(isOutputMuted);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
-  const audioContextRef = useRef<AudioContext | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Array<{ socketId: string; stream: MediaStream }>>([]);
+  const screenSenderRefs = useRef<Map<string, RTCRtpSender[]>>(new Map());
+  const remoteShareStreamsRef = useRef<Map<string, MediaStream>>(new Map());
 
   const sortedParticipants = useMemo(
     () => [...participants].sort((a, b) => a.displayName.localeCompare(b.displayName)),
     [participants]
   );
 
-  const ensureAudioContext = useCallback((): AudioContext | null => {
-    if (typeof window === 'undefined') return null;
-    const AudioContextCtor =
-      window.AudioContext ||
-      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextCtor) return null;
+  const broadcastRemoteShareStreams = useCallback(() => {
+    if (!onRemoteScreenShareChange) return;
+    const entries: RemoteScreenShare[] = Array.from(remoteShareStreamsRef.current.entries()).map(
+      ([socketId, stream]) => ({ socketId, stream })
+    );
+    onRemoteScreenShareChange(entries);
+  }, [onRemoteScreenShareChange]);
 
-    if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContextCtor();
+  const applySharedScreen = useCallback(
+    (peer: RTCPeerConnection, targetSocketId: string) => {
+      const previousSenders = screenSenderRefs.current.get(targetSocketId);
+      previousSenders?.forEach((sender) => {
+        try {
+          peer.removeTrack(sender);
+        } catch {
+          // ignore removal errors
+        }
+      });
+      screenSenderRefs.current.delete(targetSocketId);
+
+      if (!sharedScreenStream) {
+        return;
+      }
+
+      const videoTracks = sharedScreenStream.getVideoTracks();
+      if (videoTracks.length === 0) {
+        return;
+      }
+
+      const nextSenders = videoTracks.map((track) => peer.addTrack(track, sharedScreenStream));
+      screenSenderRefs.current.set(targetSocketId, nextSenders);
+    },
+    [sharedScreenStream]
+  );
+
+  useEffect(() => {
+    for (const [socketId, peer] of peersRef.current) {
+      applySharedScreen(peer, socketId);
     }
-    return audioContextRef.current;
-  }, []);
+  }, [applySharedScreen]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
     const unlockAudio = () => {
-      const context = ensureAudioContext();
-      if (!context || context.state === 'running') return;
-      context.resume().catch(() => undefined);
+      void unlockSharedAudioContext();
     };
 
     // Browser autoplay policies require a user gesture before audio playback.
@@ -80,61 +118,7 @@ export const VoiceRoom = ({
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('keydown', unlockAudio);
     };
-  }, [ensureAudioContext]);
-
-  const playVoiceCue = useCallback((action: VoiceEventPayload['action']) => {
-    const context = ensureAudioContext();
-    if (!context) return;
-
-    const playTone = (frequency: number, startAt: number, duration: number, gainValue = 0.035) => {
-      const oscillator = context.createOscillator();
-      const gainNode = context.createGain();
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(frequency, startAt);
-      gainNode.gain.setValueAtTime(0.0001, startAt);
-      gainNode.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.008);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-      oscillator.connect(gainNode);
-      gainNode.connect(context.destination);
-      oscillator.start(startAt);
-      oscillator.stop(startAt + duration + 0.01);
-    };
-
-    const run = async () => {
-      if (context.state !== 'running') {
-        try {
-          await context.resume();
-        } catch {
-          return;
-        }
-      }
-
-      const now = context.currentTime + 0.01;
-      switch (action) {
-        case 'join':
-          playTone(720, now, 0.09, 0.05);
-          playTone(940, now + 0.1, 0.11, 0.06);
-          break;
-        case 'leave':
-        case 'disconnect':
-          playTone(760, now, 0.09, 0.05);
-          playTone(420, now + 0.1, 0.12, 0.06);
-          break;
-        case 'mic-muted':
-        case 'sound-muted':
-          playTone(350, now, 0.11, 0.06);
-          break;
-        case 'mic-unmuted':
-        case 'sound-unmuted':
-          playTone(620, now, 0.11, 0.055);
-          break;
-        default:
-          break;
-      }
-    };
-
-    run().catch(() => undefined);
-  }, [ensureAudioContext]);
+  }, []);
 
   useEffect(() => {
     const ensurePeer = async (targetSocketId: string): Promise<RTCPeerConnection> => {
@@ -164,7 +148,27 @@ export const VoiceRoom = ({
         const [stream] = event.streams;
         remoteStreamsRef.current.set(targetSocketId, stream);
         setRemoteStreams(Array.from(remoteStreamsRef.current.entries()).map(([socketId, streamValue]) => ({ socketId, stream: streamValue })));
+
+        if (stream.getVideoTracks().length > 0) {
+          remoteShareStreamsRef.current.set(targetSocketId, stream);
+        } else {
+          remoteShareStreamsRef.current.delete(targetSocketId);
+        }
+        broadcastRemoteShareStreams();
+
+        if (event.track.kind === 'video') {
+          const handleEnded = () => {
+            if (remoteShareStreamsRef.current.get(targetSocketId) === stream) {
+              remoteShareStreamsRef.current.delete(targetSocketId);
+              broadcastRemoteShareStreams();
+            }
+            event.track.removeEventListener('ended', handleEnded);
+          };
+          event.track.addEventListener('ended', handleEnded);
+        }
       };
+
+      applySharedScreen(peer, targetSocketId);
 
       return peer;
     };
@@ -226,6 +230,10 @@ export const VoiceRoom = ({
           peer.close();
           peersRef.current.delete(socketId);
           remoteStreamsRef.current.delete(socketId);
+          screenSenderRefs.current.delete(socketId);
+          if (remoteShareStreamsRef.current.delete(socketId)) {
+            broadcastRemoteShareStreams();
+          }
         }
       }
 
@@ -234,6 +242,11 @@ export const VoiceRoom = ({
 
     const handleVoiceEvent = (payload: VoiceEventPayload) => {
       if (!payload || payload.channelId !== channelId) return;
+      const isLocal = payload.participant?.socketId === socket.id;
+      const localMuteActions: VoiceEventPayload['action'][] = ['mic-muted', 'mic-unmuted', 'sound-muted', 'sound-unmuted'];
+      if (isLocal && localMuteActions.includes(payload.action)) {
+        return;
+      }
       playVoiceCue(payload.action);
     };
 
@@ -281,12 +294,13 @@ export const VoiceRoom = ({
       peersRef.current.clear();
       remoteStreamsRef.current.clear();
       setRemoteStreams([]);
+      screenSenderRefs.current.clear();
+      remoteShareStreamsRef.current.clear();
+      broadcastRemoteShareStreams();
       onParticipantsChange?.([]);
 
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
-      audioContextRef.current?.close().catch(() => undefined);
-      audioContextRef.current = null;
     };
   }, [channelId, onParticipantsChange, playVoiceCue, preferredInputDeviceId, socket]);
 

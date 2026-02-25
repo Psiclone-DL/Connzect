@@ -3,8 +3,6 @@ const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
 const downloadsDir = path.join(rootDir, 'frontend', 'public', 'downloads');
-
-const TARGET_APK_NAME = 'Connzect-latest.apk';
 const TARGET_INSTALLER_NAME = 'Connzect-Setup-latest.exe';
 
 const args = process.argv.slice(2);
@@ -15,10 +13,20 @@ const readArgValue = (flag) => {
   return args[index + 1];
 };
 
-const resolveCandidate = (inputPath) => {
-  if (!inputPath) return '';
-  if (path.isAbsolute(inputPath)) return inputPath;
-  return path.resolve(rootDir, inputPath);
+const gatherInstallerCandidates = () => {
+  const distDir = path.join(rootDir, 'desktop-dist');
+  try {
+    const entries = fs.readdirSync(distDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && /^Connzect Setup .*\.exe$/i.test(entry.name))
+      .map((entry) => path.join(distDir, entry.name));
+  } catch {
+    return [];
+  }
+};
+
+const ensureDir = (dir) => {
+  fs.mkdirSync(dir, { recursive: true });
 };
 
 const findLatestByMtime = (files) => {
@@ -41,51 +49,10 @@ const findLatestByMtime = (files) => {
   return latestPath;
 };
 
-const gatherInstallerCandidates = () => {
-  const distDir = path.join(rootDir, 'desktop-dist');
-  try {
-    const entries = fs.readdirSync(distDir, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isFile() && /^Connzect Setup .*\.exe$/i.test(entry.name))
-      .map((entry) => path.join(distDir, entry.name));
-  } catch {
-    return [];
-  }
-};
-
-const gatherApkCandidates = () => {
-  const apkDir = path.join(rootDir, 'android', 'app', 'build', 'outputs', 'apk');
-  const stack = [apkDir];
-  const results = [];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) continue;
-
-    let entries = [];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const fullPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (entry.isFile() && /\.apk$/i.test(entry.name)) {
-        results.push(fullPath);
-      }
-    }
-  }
-
-  return results;
-};
-
-const ensureDir = (dir) => {
-  fs.mkdirSync(dir, { recursive: true });
+const resolveCandidate = (inputPath) => {
+  if (!inputPath) return '';
+  if (path.isAbsolute(inputPath)) return inputPath;
+  return path.resolve(rootDir, inputPath);
 };
 
 const copyIfFound = ({ source, targetName, label }) => {
@@ -110,15 +77,8 @@ const copyIfFound = ({ source, targetName, label }) => {
   }
 };
 
-const explicitApk = resolveCandidate(readArgValue('--apk'));
-const explicitInstaller = resolveCandidate(readArgValue('--installer'));
 const strict = args.includes('--strict');
-
-const apkSource =
-  explicitApk && fs.existsSync(explicitApk)
-    ? explicitApk
-    : findLatestByMtime(gatherApkCandidates());
-
+const explicitInstaller = resolveCandidate(readArgValue('--installer'));
 const installerSource =
   explicitInstaller && fs.existsSync(explicitInstaller)
     ? explicitInstaller
@@ -126,13 +86,12 @@ const installerSource =
 
 ensureDir(downloadsDir);
 
-const apkOk = copyIfFound({ source: apkSource, targetName: TARGET_APK_NAME, label: 'APK' });
 const installerOk = copyIfFound({
   source: installerSource,
   targetName: TARGET_INSTALLER_NAME,
   label: 'Installer'
 });
 
-if (strict && (!apkOk || !installerOk)) {
+if (strict && !installerOk) {
   process.exitCode = 1;
 }

@@ -61,16 +61,6 @@ export const Sidebar = ({
               +
             </button>
           ) : null}
-          <span
-            className={cn(
-              'inline-flex min-w-6 items-center justify-center rounded-md border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-200',
-              collapsed ? 'hidden' : 'inline-flex'
-            )}
-            title={`${servers.length} servers`}
-            aria-label={`Server count: ${servers.length}`}
-          >
-            {servers.length}
-          </span>
           <div className={cn('h-2 w-2 rounded-full bg-emerald-300/70', collapsed ? 'hidden' : 'block')} />
         </div>
       </div>
