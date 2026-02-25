@@ -1,6 +1,6 @@
 {
   "name": "connzect",
-  "version": "1.0.72",
+  "version": "1.0.73",
   "private": true,
   "main": "electron/main.cjs",
   "workspaces": [
