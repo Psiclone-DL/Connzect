@@ -148,6 +148,18 @@ const getVoiceParticipantOverlayClasses = (participant: VoiceParticipant): strin
   return 'border-slate-400/80 bg-slate-900/40';
 };
 
+const ChannelUserBadge = () => (
+  <span
+    aria-hidden="true"
+    className="flex h-5 w-5 items-center justify-center rounded-full border border-white/30 bg-neutral-950/75 text-[9px] text-white shadow-lg drop-shadow-lg"
+  >
+    <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.25">
+      <path d="M10 5.5a3 3 0 1 1 0 6 3 3 0 0 1 0-6z" />
+      <path strokeLinecap="round" d="M5.5 14.5c0-2.5 2.5-3.5 4.5-3.5s4.5 1 4.5 3.5v1H5.5z" />
+    </svg>
+  </span>
+);
+
 const VoiceParticipantAvatar = ({ participant }: { participant: VoiceParticipant }) => {
   const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
   const overlayClasses = getVoiceParticipantOverlayClasses(participant);
@@ -2957,9 +2969,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                   ? 'border-emerald-200/65 bg-emerald-300/15'
                                   : ''
                               )}
-                            >
-                              <span className="inline-flex items-center gap-2">
-                                {canMoveChannels ? <span className="text-[10px] text-emerald-100/45">::</span> : null}
+                                >
+                                  <span className="inline-flex items-center gap-2">
+                                    {canMoveChannels ? <span className="text-[10px] text-emerald-100/45">::</span> : null}
                                 <span className="text-emerald-100/85">{categoryCollapsed ? '>' : 'v'}</span>
                                 <span>{category.name}</span>
                               </span>
@@ -2970,48 +2982,48 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                               <>
                                 {categoryItems.map((channel) => (
                                   <div key={channel.id} className="space-y-1 pl-3">
-                                    <button
-                                      type="button"
-                                      data-channel-item="true"
-                                      draggable={canMoveChannels}
-                                      onDragStart={() => handleDragStart(channel.id)}
-                                      onDragEnd={handleDragEnd}
-                                      onDragOver={(event) => {
-                                        if (!canMoveChannels) return;
-                                        event.preventDefault();
-                                        setDragOverTarget({ kind: 'channel', id: channel.id });
-                                      }}
-                                      onDragLeave={(event) => {
-                                        if (!canMoveChannels) return;
-                                        const nextTarget = event.relatedTarget as Node | null;
-                                        if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-                                        setDragOverTarget((previous) =>
-                                          previous?.kind === 'channel' && previous.id === channel.id ? null : previous
-                                        );
-                                      }}
-                                      onDrop={(event) => {
-                                        if (!canMoveChannels) return;
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        void dropBeforeChannel(channel.id);
-                                      }}
-                                      onClick={() => {
-                                        if (shouldIgnoreClickAfterDrag()) return;
-                                        openChannel(channel);
-                                      }}
-                                      onContextMenu={(event) => openChannelContextMenu(event, channel)}
-                                      className={cn(
-                                        'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
-                                        canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
-                                        draggedChannelId === channel.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
-                                        activeChannelId === channel.id
-                                          ? 'border-emerald-200/45 bg-white/10'
-                                          : 'border-transparent hover:border-white/20 hover:bg-white/5',
-                                        dragOverTarget?.kind === 'channel' && dragOverTarget.id === channel.id
-                                          ? 'border-emerald-200/65 bg-emerald-300/15'
-                                          : ''
-                                      )}
-                                    >
+                                      <button
+                                        type="button"
+                                        data-channel-item="true"
+                                        draggable={canMoveChannels}
+                                        onDragStart={() => handleDragStart(channel.id)}
+                                        onDragEnd={handleDragEnd}
+                                        onDragOver={(event) => {
+                                          if (!canMoveChannels) return;
+                                          event.preventDefault();
+                                          setDragOverTarget({ kind: 'channel', id: channel.id });
+                                        }}
+                                        onDragLeave={(event) => {
+                                          if (!canMoveChannels) return;
+                                          const nextTarget = event.relatedTarget as Node | null;
+                                          if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                                          setDragOverTarget((previous) =>
+                                            previous?.kind === 'channel' && previous.id === channel.id ? null : previous
+                                          );
+                                        }}
+                                        onDrop={(event) => {
+                                          if (!canMoveChannels) return;
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          void dropBeforeChannel(channel.id);
+                                        }}
+                                        onClick={() => {
+                                          if (shouldIgnoreClickAfterDrag()) return;
+                                          openChannel(channel);
+                                        }}
+                                        onContextMenu={(event) => openChannelContextMenu(event, channel)}
+                                        className={cn(
+                                          'relative overflow-visible flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                                          canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
+                                          draggedChannelId === channel.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
+                                          activeChannelId === channel.id
+                                            ? 'border-emerald-200/45 bg-white/10'
+                                            : 'border-transparent hover:border-white/20 hover:bg-white/5',
+                                          dragOverTarget?.kind === 'channel' && dragOverTarget.id === channel.id
+                                            ? 'border-emerald-200/65 bg-emerald-300/15'
+                                            : ''
+                                        )}
+                                      >
                                       <span className="inline-flex items-center gap-2">
                                         {canMoveChannels ? <span className="text-[10px] text-emerald-100/45">::</span> : null}
                                         {channel.type === 'VOICE' ? (
@@ -3033,6 +3045,9 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                           <span className="text-emerald-100/85">#</span>
                                         )}
                                         <span>{channel.name}</span>
+                                      </span>
+                                      <span className="pointer-events-none absolute -right-3 top-1/2 -translate-y-1/2">
+                                        <ChannelUserBadge />
                                       </span>
                                     </button>
 
@@ -3113,7 +3128,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 }}
                                 onContextMenu={(event) => openChannelContextMenu(event, channel)}
                                 className={cn(
-                                  'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
+                                  'relative overflow-visible flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm transition',
                                   canMoveChannels ? 'cursor-grab active:cursor-grabbing' : '',
                                   draggedChannelId === channel.id ? 'border-emerald-200/45 bg-emerald-300/10 opacity-65' : '',
                                   activeChannelId === channel.id
@@ -3144,9 +3159,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                   ) : (
                                     <span className="text-emerald-100/85">#</span>
                                   )}
-                                  <span>{channel.name}</span>
-                                </span>
-                              </button>
+                                    <span>{channel.name}</span>
+                                  </span>
+                                  <span className="pointer-events-none absolute -right-3 top-1/2 -translate-y-1/2">
+                                    <ChannelUserBadge />
+                                  </span>
+                                </button>
 
                               {channel.type === 'VOICE' &&
                               connectedVoiceChannelId === channel.id &&
