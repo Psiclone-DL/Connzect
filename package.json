@@ -21,6 +21,7 @@
     "dist:win:publish": "npm run build:desktop && electron-builder --win nsis --publish always"
   },
   "dependencies": {
+    "certbot": "^5.0.3",
     "electron-updater": "^6.8.3"
   },
   "devDependencies": {

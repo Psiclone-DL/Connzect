@@ -147,6 +147,18 @@ npm run dev
 
 Frontend runs on `http://localhost:3000`.
 
+## SSL (Certbot)
+
+1. Copy the root `.env.example` to `.env`, set `DOMAIN`, `WWW_DOMAIN` (optional), and `LETSENCRYPT_EMAIL`, and make sure your DNS points to this server. The same file controls the build-time `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SOCKET_URL`, and artifact URLs so they can reference `https://<your domain>`.
+2. Start the full stack so that Nginx is running on ports 80/443:
+   ```bash
+   docker compose up -d --build backend frontend nginx
+   ```
+3. Run `./scripts/certbot/issue-cert.sh` once to request certificates via the webroot plugin. The script uses the Certbot container and automatically reloads Nginx afterwards.
+4. Certificates are saved under `certbot/conf`. Renew them anytime with `./scripts/certbot/renew-cert.sh` (add a cron job or GitHub Actions workflow that runs it twice a day), which also reloads Nginx after a successful renewal.
+
+The `nginx.conf` template now expects `${DOMAIN}` and `${WWW_DOMAIN}` and serves `/.well-known/acme-challenge` from `certbot/www`; `scripts/nginx/render-nginx.sh` injects the values before launching Nginx.
+
 ## Android (.apk) Build
 
 Connzect Android is a native WebView wrapper available in `android/`.

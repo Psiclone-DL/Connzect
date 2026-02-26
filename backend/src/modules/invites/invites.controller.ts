@@ -8,6 +8,8 @@ import { pickInviteCode } from './invite-code';
 import { notifyServerMemberActivity } from '../servers/server-activity';
 import { requireServerPermission } from '../servers/server-access';
 
+const EVERYONE_ROLE_NAME = '@everyone';
+
 export const createInvite = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) throw new HttpError(401, 'Unauthorized');
 
@@ -134,7 +136,8 @@ export const joinByInvite = async (req: Request, res: Response): Promise<void> =
     const defaultRole = await tx.role.findFirst({
       where: {
         serverId: invite.serverId,
-        isDefault: true
+        isDefault: true,
+        name: EVERYONE_ROLE_NAME
       }
     });
 

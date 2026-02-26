@@ -89,7 +89,12 @@ export const login = async (email: string, password: string) => {
 };
 
 export const refreshSession = async (refreshToken: string) => {
-  const payload = verifyRefreshToken(refreshToken);
+  let payload: ReturnType<typeof verifyRefreshToken>;
+  try {
+    payload = verifyRefreshToken(refreshToken);
+  } catch {
+    throw new HttpError(StatusCodes.UNAUTHORIZED, 'Refresh token invalid');
+  }
 
   if (payload.type !== 'refresh') {
     throw new HttpError(StatusCodes.UNAUTHORIZED, 'Invalid token type');

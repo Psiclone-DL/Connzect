@@ -7,10 +7,22 @@ import { Permission } from '../../utils/permissions';
 import { notifyServerMemberActivity } from '../servers/server-activity';
 import { requireServerPermission } from '../servers/server-access';
 
+const SERVER_OWNER_ROLE_NAME = 'Server Owner';
+
 const ensureNotOwner = async (serverId: string, memberId: string) => {
   const member = await prisma.serverMember.findUnique({
     where: { id: memberId },
     include: {
+      memberRoles: {
+        include: {
+          role: {
+            select: {
+              name: true,
+              isDefault: true
+            }
+          }
+        }
+      },
       user: {
         select: {
           id: true,
@@ -30,6 +42,13 @@ const ensureNotOwner = async (serverId: string, memberId: string) => {
 
   if (server.ownerId === member.userId) {
     throw new HttpError(400, 'Cannot target server owner');
+  }
+
+  const hasServerOwnerRole = member.memberRoles.some(
+    (entry) => entry.role.isDefault && entry.role.name === SERVER_OWNER_ROLE_NAME
+  );
+  if (hasServerOwnerRole) {
+    throw new HttpError(400, 'Cannot target Server Owner');
   }
 
   return member;
@@ -129,10 +148,40 @@ export const leaveServer = async (req: Request, res: Response): Promise<void> =>
 
     await prisma.$transaction(async (tx) => {
       if (nextOwnerMember) {
+        const serverOwnerRole = await tx.role.findFirst({
+          where: {
+            serverId,
+            isDefault: true,
+            name: SERVER_OWNER_ROLE_NAME
+          },
+          select: {
+            id: true
+          }
+        });
+
+        if (!serverOwnerRole) {
+          throw new HttpError(500, 'Server Owner role missing');
+        }
+
         await tx.server.update({
           where: { id: serverId },
           data: { ownerId: nextOwnerMember.userId }
         });
+
+        await tx.memberRole.upsert({
+          where: {
+            memberId_roleId: {
+              memberId: nextOwnerMember.id,
+              roleId: serverOwnerRole.id
+            }
+          },
+          create: {
+            memberId: nextOwnerMember.id,
+            roleId: serverOwnerRole.id
+          },
+          update: {}
+        });
+
         await tx.serverMember.delete({ where: { id: member.id } });
         return;
       }

@@ -24,6 +24,7 @@ interface VoiceRoomProps {
   socket: Socket;
   isMicMuted?: boolean;
   isOutputMuted?: boolean;
+  memberAudioSettings?: Record<string, { volume: number; muted: boolean }>;
   preferredInputDeviceId?: string;
   preferredOutputDeviceId?: string;
   onParticipantsChange?: (participants: VoiceParticipant[]) => void;
@@ -40,6 +41,7 @@ export const VoiceRoom = ({
   socket,
   isMicMuted = false,
   isOutputMuted = false,
+  memberAudioSettings,
   preferredInputDeviceId,
   preferredOutputDeviceId,
   onParticipantsChange,
@@ -250,11 +252,47 @@ export const VoiceRoom = ({
       playVoiceCue(payload.action);
     };
 
+    const attachLocalAudio = async (stream: MediaStream) => {
+      localStreamRef.current = stream;
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = !micMutedRef.current;
+      });
+
+      for (const [targetSocketId, peer] of peersRef.current) {
+        stream.getTracks().forEach((track) => {
+          peer.addTrack(track, stream);
+        });
+
+        if (socket.id && socket.id < targetSocketId && peer.signalingState === 'stable') {
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
+          socket.emit('webrtc:signal', {
+            toSocketId: targetSocketId,
+            type: 'offer',
+            data: offer
+          });
+        }
+      }
+    };
+
     const initialize = async () => {
+      socket.emit('voice:join', {
+        channelId,
+        isMicMuted: micMutedRef.current,
+        isOutputMuted: outputMutedRef.current
+      });
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('Connected without microphone. Browser blocks media access on this origin.');
+        return;
+      }
+
       try {
         const audioConstraints = preferredInputDeviceId ? { deviceId: { exact: preferredInputDeviceId } } : true;
+        let stream: MediaStream;
+
         try {
-          localStreamRef.current = await navigator.mediaDevices.getUserMedia({
+          stream = await navigator.mediaDevices.getUserMedia({
             audio: audioConstraints,
             video: false
           });
@@ -263,18 +301,13 @@ export const VoiceRoom = ({
             throw preferredDeviceError;
           }
 
-          localStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         }
-        localStreamRef.current.getAudioTracks().forEach((track) => {
-          track.enabled = !micMutedRef.current;
-        });
-        socket.emit('voice:join', {
-          channelId,
-          isMicMuted: micMutedRef.current,
-          isOutputMuted: outputMutedRef.current
-        });
+
+        await attachLocalAudio(stream);
+        setError(null);
       } catch {
-        setError('Microphone access is required for voice channels.');
+        setError('Connected without microphone. Allow microphone access to transmit audio.');
       }
     };
 
@@ -349,12 +382,20 @@ export const VoiceRoom = ({
 
       <div className="space-y-2">
         {remoteStreams.map((entry) => (
-          <RemoteAudio
-            key={entry.socketId}
-            stream={entry.stream}
-            preferredOutputDeviceId={preferredOutputDeviceId}
-            isOutputMuted={isOutputMuted}
-          />
+          (() => {
+            const participant = participants.find((candidate) => candidate.socketId === entry.socketId);
+            const memberAudio = participant ? memberAudioSettings?.[participant.userId] : undefined;
+            return (
+              <RemoteAudio
+                key={entry.socketId}
+                stream={entry.stream}
+                preferredOutputDeviceId={preferredOutputDeviceId}
+                isOutputMuted={isOutputMuted}
+                isLocallyMuted={Boolean(memberAudio?.muted)}
+                volume={typeof memberAudio?.volume === 'number' ? memberAudio.volume : 100}
+              />
+            );
+          })()
         ))}
       </div>
     </div>
@@ -364,11 +405,15 @@ export const VoiceRoom = ({
 const RemoteAudio = ({
   stream,
   preferredOutputDeviceId,
-  isOutputMuted
+  isOutputMuted,
+  isLocallyMuted,
+  volume
 }: {
   stream: MediaStream;
   preferredOutputDeviceId?: string;
   isOutputMuted?: boolean;
+  isLocallyMuted?: boolean;
+  volume?: number;
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -388,8 +433,9 @@ const RemoteAudio = ({
 
   useEffect(() => {
     if (!audioRef.current) return;
-    audioRef.current.muted = Boolean(isOutputMuted);
-  }, [isOutputMuted]);
+    audioRef.current.muted = Boolean(isOutputMuted) || Boolean(isLocallyMuted);
+    audioRef.current.volume = Math.max(0, Math.min(1, (volume ?? 100) / 100));
+  }, [isLocallyMuted, isOutputMuted, volume]);
 
   return <audio ref={audioRef} autoPlay playsInline />;
 };

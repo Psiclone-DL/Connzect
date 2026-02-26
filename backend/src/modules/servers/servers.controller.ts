@@ -3,10 +3,13 @@ import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
 import { routeParam } from '../../utils/params';
-import { Permission } from '../../utils/permissions';
+import { ALL_PERMISSIONS, Permission } from '../../utils/permissions';
 import { pickInviteCode } from '../invites/invite-code';
 import { notifyServerMemberActivity } from './server-activity';
 import { requireServerPermission } from './server-access';
+
+const EVERYONE_ROLE_NAME = '@everyone';
+const SERVER_OWNER_ROLE_NAME = 'Server Owner';
 
 const serializeRole = <T extends { permissions: bigint }>(role: T) => ({
   ...role,
@@ -39,10 +42,20 @@ export const createServer = async (req: Request, res: Response): Promise<void> =
     const everyoneRole = await tx.role.create({
       data: {
         serverId: server.id,
-        name: '@everyone',
+        name: EVERYONE_ROLE_NAME,
         position: 0,
         isDefault: true,
         permissions: Permission.VIEW_CHANNEL | Permission.SEND_MESSAGE | Permission.CONNECT_VOICE
+      }
+    });
+
+    const serverOwnerRole = await tx.role.create({
+      data: {
+        serverId: server.id,
+        name: SERVER_OWNER_ROLE_NAME,
+        position: 1,
+        isDefault: true,
+        permissions: ALL_PERMISSIONS
       }
     });
 
@@ -50,6 +63,12 @@ export const createServer = async (req: Request, res: Response): Promise<void> =
       data: {
         memberId: ownerMember.id,
         roleId: everyoneRole.id
+      }
+    });
+    await tx.memberRole.create({
+      data: {
+        memberId: ownerMember.id,
+        roleId: serverOwnerRole.id
       }
     });
 
@@ -237,7 +256,11 @@ export const addMemberByEmail = async (req: Request, res: Response): Promise<voi
   });
 
   const defaultRole = await prisma.role.findFirst({
-    where: { serverId, isDefault: true }
+    where: {
+      serverId,
+      isDefault: true,
+      name: EVERYONE_ROLE_NAME
+    }
   });
 
   if (!defaultRole) {

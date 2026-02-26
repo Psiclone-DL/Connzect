@@ -11,3 +11,7 @@ desktop-runtime
 frontend/public/downloads/*.apk
 frontend/public/downloads/*.exe
 frontend/public/downloads/*.blockmap
+certbot/conf/*
+!certbot/conf/.gitkeep
+certbot/www/*
+!certbot/www/.gitkeep

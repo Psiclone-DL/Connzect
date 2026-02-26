@@ -33,6 +33,14 @@ interface LandingPageProps {
   requireAuth?: boolean;
 }
 
+type VoiceServerParticipantsPayload = {
+  serverId: string;
+  channels: Array<{
+    channelId: string;
+    participants: VoiceParticipant[];
+  }>;
+};
+
 const parseInviteCode = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) return '';
@@ -160,7 +168,13 @@ const ChannelUserBadge = () => (
   </span>
 );
 
-const VoiceParticipantAvatar = ({ participant }: { participant: VoiceParticipant }) => {
+const VoiceParticipantAvatar = ({
+  participant,
+  onContextMenu
+}: {
+  participant: VoiceParticipant;
+  onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
+}) => {
   const avatarUrl = resolveAssetUrl(participant.avatarUrl ?? null);
   const overlayClasses = getVoiceParticipantOverlayClasses(participant);
   const initial = participant.displayName.trim().charAt(0).toUpperCase() || '?';
@@ -168,20 +182,21 @@ const VoiceParticipantAvatar = ({ participant }: { participant: VoiceParticipant
   const showSoundBadge = participant.isOutputMuted;
 
   return (
-    <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center">
+    <button
+      type="button"
+      onContextMenu={onContextMenu}
+      className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center"
+      title={participant.displayName}
+    >
       {avatarUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={avatarUrl}
           alt={participant.displayName}
-          title={participant.displayName}
           className="h-full w-full rounded-full border border-white/20 object-cover"
         />
       ) : (
-        <span
-          title={participant.displayName}
-          className="flex h-full w-full items-center justify-center rounded-full border border-white/20 bg-white/5 text-[9px] font-semibold"
-        >
+        <span className="flex h-full w-full items-center justify-center rounded-full border border-white/20 bg-white/5 text-[10px] font-semibold">
           {initial}
         </span>
       )}
@@ -209,7 +224,7 @@ const VoiceParticipantAvatar = ({ participant }: { participant: VoiceParticipant
           className={`pointer-events-none absolute inset-0 rounded-full border-2 ${overlayClasses}`}
         />
       ) : null}
-    </span>
+    </button>
   );
 };
 
@@ -302,6 +317,11 @@ type RankedMemberEntry = {
   rank: number;
 };
 
+type VoiceContextParticipant = {
+  channelId: string;
+  participant: VoiceParticipant;
+};
+
 type ContextMenuState =
   | {
       type: 'channel';
@@ -320,6 +340,12 @@ type ContextMenuState =
       x: number;
       y: number;
       member: RankedMemberEntry;
+    }
+  | {
+      type: 'voiceParticipant';
+      x: number;
+      y: number;
+      entry: VoiceContextParticipant;
     }
   | {
       type: 'channelList';
@@ -400,6 +426,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [connectedVoiceChannelId, setConnectedVoiceChannelId] = useState('');
   const [connectedVoiceChannelName, setConnectedVoiceChannelName] = useState('');
   const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
+  const [voiceParticipantsByChannel, setVoiceParticipantsByChannel] = useState<Record<string, VoiceParticipant[]>>({});
   const [shareStream, setShareStream] = useState<MediaStream | null>(null);
   const [sharePending, setSharePending] = useState(false);
   const [shareScreenError, setShareScreenError] = useState<string | null>(null);
@@ -422,6 +449,8 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   const [serverSettingsIconFile, setServerSettingsIconFile] = useState<File | null>(null);
   const [serverSettingsSystemChannelId, setServerSettingsSystemChannelId] = useState('');
   const [isSavingServerSettings, setIsSavingServerSettings] = useState(false);
+  const [friendUserIds, setFriendUserIds] = useState<Record<string, boolean>>({});
+  const [blockedUserIds, setBlockedUserIds] = useState<Record<string, boolean>>({});
   const [inviteManagerOpen, setInviteManagerOpen] = useState(false);
   const [inviteManagerServer, setInviteManagerServer] = useState<ConnzectServer | null>(null);
   const [serverInvites, setServerInvites] = useState<Invite[]>([]);
@@ -468,21 +497,12 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
   );
   const isVoiceConnected = Boolean(connectedVoiceChannelId);
   const canShowVoiceActions = Boolean(isVoiceConnected && user);
-  const displayedVoiceParticipants = useMemo(() => {
-    if (!isVoiceConnected || !user) return voiceParticipants;
-    if (voiceParticipants.some((participant) => participant.userId === user.id)) return voiceParticipants;
-    return [
-      {
-        socketId: `local-${user.id}`,
-        userId: user.id,
-        displayName: user.displayName,
-        avatarUrl: user.avatarUrl ?? null,
-        isMicMuted,
-        isOutputMuted
-      },
-      ...voiceParticipants
-    ];
-  }, [isMicMuted, isOutputMuted, isVoiceConnected, user, voiceParticipants]);
+  const displayedVoiceParticipants = useMemo(() => voiceParticipants, [voiceParticipants]);
+  const getDisplayedChannelVoiceParticipants = useCallback(
+    (channelId: string): VoiceParticipant[] =>
+      channelId === connectedVoiceChannelId ? displayedVoiceParticipants : (voiceParticipantsByChannel[channelId] ?? []),
+    [connectedVoiceChannelId, displayedVoiceParticipants, voiceParticipantsByChannel]
+  );
   const sharePreviews = useMemo(() => {
     const entries: ScreenSharePreview[] = [];
     if (shareStream) {
@@ -963,6 +983,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
       setChannels([]);
       setServerMembers([]);
       setServerRoles([]);
+      setVoiceParticipantsByChannel({});
       setCollapsedCategoryIds({});
       setActiveChannelId('');
       setActiveTextChannelId('');
@@ -1011,14 +1032,24 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
         setError(nextError instanceof Error ? nextError.message : 'Failed to refresh server members');
       });
     };
+    const onVoiceParticipants = (payload: VoiceServerParticipantsPayload) => {
+      if (!payload || payload.serverId !== currentServerId) return;
+      const nextByChannel: Record<string, VoiceParticipant[]> = {};
+      payload.channels.forEach((entry) => {
+        nextByChannel[entry.channelId] = entry.participants;
+      });
+      setVoiceParticipantsByChannel(nextByChannel);
+    };
 
     joinServerRoom();
     socket.on('server:members:changed', onMembersChanged);
+    socket.on('voice:server:participants', onVoiceParticipants);
     socket.on('connect', joinServerRoom);
 
     return () => {
       socket.emit('server:leave', { serverId: currentServerId });
       socket.off('server:members:changed', onMembersChanged);
+      socket.off('voice:server:participants', onVoiceParticipants);
       socket.off('connect', joinServerRoom);
     };
   }, [activeServerId, refreshActiveServerDetails, socket]);
@@ -1526,6 +1557,25 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     setContextMenu({ type: 'member', x, y, member });
   };
 
+  const openVoiceParticipantContextMenu = (
+    event: MouseEvent<HTMLButtonElement>,
+    channelId: string,
+    participant: VoiceParticipant
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const { x, y } = resolveContextMenuPosition(event.clientX, event.clientY);
+    setContextMenu({
+      type: 'voiceParticipant',
+      x,
+      y,
+      entry: {
+        channelId,
+        participant
+      }
+    });
+  };
+
   const openServerContextMenu = (event: MouseEvent<HTMLButtonElement>, server: ConnzectServer) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1846,23 +1896,35 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     [activeChatChannelId]
   );
 
-  const messageMember = useCallback(
-    async (member: RankedMemberEntry) => {
-      if (member.userId === user?.id) {
+  const messageUserById = useCallback(
+    async (targetUserId: string) => {
+      if (targetUserId === user?.id) {
+        return;
+      }
+      const targetMember = serverMembers.find((member) => member.userId === targetUserId);
+      if (!targetMember?.user.email) {
+        setError('Cannot open DM: user email is unavailable in this server context.');
         return;
       }
 
       try {
         const conversation = await authRequest<DirectConversation>('/dm/conversations', {
           method: 'POST',
-          body: JSON.stringify({ email: member.userEmail })
+          body: JSON.stringify({ email: targetMember.user.email })
         });
         router.push(`/dm/${conversation.id}`);
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : 'Failed to start conversation');
       }
     },
-    [authRequest, router, user?.id]
+    [authRequest, router, serverMembers, user?.id]
+  );
+
+  const messageMember = useCallback(
+    async (member: RankedMemberEntry) => {
+      await messageUserById(member.userId);
+    },
+    [messageUserById]
   );
 
   const updateMemberVolume = useCallback((memberUserId: string, volume: number) => {
@@ -1891,6 +1953,59 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
     },
     []
   );
+
+  const toggleLocalVoiceMute = useCallback((targetUserId: string) => {
+    setMemberAudioSettings((previous) => {
+      const current = previous[targetUserId] ?? { volume: 100, muted: false };
+      const muted = !current.muted;
+      return {
+        ...previous,
+        [targetUserId]: {
+          volume: muted ? 0 : current.volume === 0 ? 100 : current.volume,
+          muted
+        }
+      };
+    });
+  }, []);
+
+  const toggleFriendUser = useCallback((targetUserId: string) => {
+    setFriendUserIds((previous) => {
+      if (previous[targetUserId]) {
+        const next = { ...previous };
+        delete next[targetUserId];
+        return next;
+      }
+      return {
+        ...previous,
+        [targetUserId]: true
+      };
+    });
+  }, []);
+
+  const toggleBlockedUser = useCallback((targetUserId: string) => {
+    setBlockedUserIds((previous) => {
+      const next = { ...previous };
+      const willBlock = !next[targetUserId];
+      if (willBlock) {
+        next[targetUserId] = true;
+      } else {
+        delete next[targetUserId];
+      }
+      return next;
+    });
+
+    setMemberAudioSettings((previous) => {
+      const current = previous[targetUserId] ?? { volume: 100, muted: false };
+      const willBlock = !blockedUserIds[targetUserId];
+      return {
+        ...previous,
+        [targetUserId]: {
+          volume: willBlock ? 0 : current.volume === 0 ? 100 : current.volume,
+          muted: willBlock ? true : false
+        }
+      };
+    });
+  }, [blockedUserIds]);
 
   const openServerWidget = (serverId: string) => {
     if (activeServerId === serverId) {
@@ -3038,15 +3153,21 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                     </button>
 
                                     {channel.type === 'VOICE' &&
-                                    connectedVoiceChannelId === channel.id &&
-                                    displayedVoiceParticipants.length > 0 ? (
-                                      <div className="flex items-center gap-1.5 px-2">
-                                        {displayedVoiceParticipants.map((participant) => (
-                                          <VoiceParticipantAvatar
-                                            key={participant.socketId}
-                                            participant={participant}
-                                          />
-                                        ))}
+                                    getDisplayedChannelVoiceParticipants(channel.id).length > 0 ? (
+                                      <div className="ml-5 mt-1 flex items-center gap-2 border-l border-emerald-200/30 pl-2">
+                                        <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.12em] text-emerald-100/75">
+                                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                                          {getDisplayedChannelVoiceParticipants(channel.id).length}
+                                        </span>
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          {getDisplayedChannelVoiceParticipants(channel.id).map((participant) => (
+                                            <VoiceParticipantAvatar
+                                              key={participant.socketId}
+                                              participant={participant}
+                                              onContextMenu={(event) => openVoiceParticipantContextMenu(event, channel.id, participant)}
+                                            />
+                                          ))}
+                                        </div>
                                       </div>
                                     ) : null}
                                   </div>
@@ -3153,15 +3274,21 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                                 </button>
 
                               {channel.type === 'VOICE' &&
-                              connectedVoiceChannelId === channel.id &&
-                              displayedVoiceParticipants.length > 0 ? (
-                                <div className="flex items-center gap-1.5 px-2">
-                                  {displayedVoiceParticipants.map((participant) => (
-                                    <VoiceParticipantAvatar
-                                      key={participant.socketId}
-                                      participant={participant}
-                                    />
-                                  ))}
+                              getDisplayedChannelVoiceParticipants(channel.id).length > 0 ? (
+                                <div className="ml-5 mt-1 flex items-center gap-2 border-l border-emerald-200/30 pl-2">
+                                  <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.12em] text-emerald-100/75">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                                    {getDisplayedChannelVoiceParticipants(channel.id).length}
+                                  </span>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {getDisplayedChannelVoiceParticipants(channel.id).map((participant) => (
+                                      <VoiceParticipantAvatar
+                                        key={participant.socketId}
+                                        participant={participant}
+                                        onContextMenu={(event) => openVoiceParticipantContextMenu(event, channel.id, participant)}
+                                      />
+                                    ))}
+                                  </div>
                                 </div>
                               ) : null}
                             </div>
@@ -3185,6 +3312,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                           socket={socket}
                           isMicMuted={isMicMuted}
                           isOutputMuted={isOutputMuted}
+                          memberAudioSettings={memberAudioSettings}
                           preferredInputDeviceId={selectedAudioInputId || undefined}
                           preferredOutputDeviceId={selectedAudioOutputId || undefined}
                           onParticipantsChange={setVoiceParticipants}
@@ -3553,7 +3681,7 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                   <span className="text-xs text-red-300/80">Leave</span>
                 </button>
               </>
-            ) : (() => {
+            ) : contextMenu.type === 'member' ? (() => {
                 const audio = memberAudioSettings[contextMenu.member.userId] ?? { volume: 100, muted: false };
                 return (
                   <>
@@ -3603,6 +3731,119 @@ export const LandingPage = ({ requireAuth = false }: LandingPageProps) => {
                       <span>Copy User ID</span>
                       <span className="text-xs text-slate-400">ID</span>
                     </button>
+                  </>
+                );
+              })() : (() => {
+                const voiceUserId = contextMenu.entry.participant.userId;
+                const audio = memberAudioSettings[voiceUserId] ?? { volume: 100, muted: false };
+                const isFriend = Boolean(friendUserIds[voiceUserId]);
+                const isBlocked = Boolean(blockedUserIds[voiceUserId]);
+                const isSelf = voiceUserId === user?.id;
+                return (
+                  <>
+                    <p className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100/80">
+                      {contextMenu.entry.participant.displayName}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void copyValue(voiceUserId, 'User ID');
+                        setContextMenu(null);
+                      }}
+                      className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                    >
+                      <span>Copy User ID</span>
+                      <span className="text-xs text-slate-400">ID</span>
+                    </button>
+                    {isSelf ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsMicMuted((previous) => !previous);
+                            setContextMenu(null);
+                          }}
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                        >
+                          <span>Mute yourself</span>
+                          <span className="text-xs text-slate-400">{isMicMuted ? 'Muted' : 'On'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsOutputMuted((previous) => !previous);
+                            setContextMenu(null);
+                          }}
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                        >
+                          <span>Deafen</span>
+                          <span className="text-xs text-slate-400">{isOutputMuted ? 'On' : 'Off'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            disconnectVoice();
+                            setContextMenu(null);
+                          }}
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-red-200 transition hover:bg-red-500/15"
+                        >
+                          <span>Disconnect</span>
+                          <span className="text-xs text-red-300/80">Leave</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="mt-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                          <div className="mb-2 flex items-center justify-between text-[11px] text-slate-300">
+                            <span>Change volume</span>
+                            <span>{audio.volume}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={audio.volume}
+                            onChange={(event) => updateMemberVolume(voiceUserId, Number(event.target.value))}
+                            className="h-1.5 w-full accent-emerald-300"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleLocalVoiceMute(voiceUserId)}
+                          className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                        >
+                          <span>Mute locally</span>
+                          <span className="text-xs text-slate-400">{audio.muted || audio.volume === 0 ? 'Muted' : 'On'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void messageUserById(voiceUserId);
+                            setContextMenu(null);
+                          }}
+                          className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                        >
+                          <span>Open DM</span>
+                          <span className="text-xs text-slate-400">Chat</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleFriendUser(voiceUserId)}
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-slate-100 transition hover:bg-white/10"
+                        >
+                          <span>{isFriend ? 'Remove Friend' : 'Add Friend'}</span>
+                          <span className="text-xs text-slate-400">{isFriend ? 'Added' : 'Friend'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleBlockedUser(voiceUserId)}
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-red-200 transition hover:bg-red-500/15"
+                        >
+                          <span>{isBlocked ? 'Unblock' : 'Block'}</span>
+                          <span className="text-xs text-red-300/80">{isBlocked ? 'Allowed' : 'Blocked'}</span>
+                        </button>
+                      </>
+                    )}
                   </>
                 );
               })()}

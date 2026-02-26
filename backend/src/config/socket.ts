@@ -25,6 +25,11 @@ type VoiceParticipant = {
   isOutputMuted: boolean;
 };
 
+type VoiceChannelSnapshot = {
+  channelId: string;
+  participants: VoiceParticipant[];
+};
+
 type VoiceEventAction =
   | 'join'
   | 'leave'
@@ -45,9 +50,31 @@ const includeAuthor = {
 } as const;
 
 const voiceParticipants = new Map<string, Map<string, VoiceParticipant>>();
+const voiceChannelServers = new Map<string, string>();
 const broadcastVoiceParticipants = (io: Server, channelId: string): void => {
   const participants = Array.from(voiceParticipants.get(channelId)?.values() ?? []);
   io.to(`voice:${channelId}`).emit('voice:participants', participants);
+};
+
+const getServerVoiceSnapshots = (serverId: string): VoiceChannelSnapshot[] => {
+  const snapshots: VoiceChannelSnapshot[] = [];
+  for (const [channelId, channelParticipants] of voiceParticipants.entries()) {
+    if (voiceChannelServers.get(channelId) !== serverId) {
+      continue;
+    }
+    snapshots.push({
+      channelId,
+      participants: Array.from(channelParticipants.values())
+    });
+  }
+  return snapshots;
+};
+
+const emitServerVoiceSnapshots = (io: Server, serverId: string): void => {
+  io.to(`server:${serverId}`).emit('voice:server:participants', {
+    serverId,
+    channels: getServerVoiceSnapshots(serverId)
+  });
 };
 
 const toVoiceParticipant = (socket: AuthenticatedSocket): VoiceParticipant => ({
@@ -168,6 +195,10 @@ export const setupSocket = (io: Server): void => {
       try {
         await getMemberContext(serverId, authedSocket.data.userId);
         authedSocket.join(`server:${serverId}`);
+        authedSocket.emit('voice:server:participants', {
+          serverId,
+          channels: getServerVoiceSnapshots(serverId)
+        });
       } catch (error) {
         authedSocket.emit('error:event', {
           scope: 'server:join',
@@ -504,6 +535,7 @@ export const setupSocket = (io: Server): void => {
       }) => {
       try {
         const { channel, effective } = await ensureChannelMessagingAccess(channelId, authedSocket.data.userId);
+        const targetServerId = channel.serverId;
 
         if (channel.type !== 'VOICE') {
           throw new Error('Channel is not a voice channel');
@@ -525,15 +557,20 @@ export const setupSocket = (io: Server): void => {
 
         if (authedSocket.data.voiceChannelId && authedSocket.data.voiceChannelId !== channelId) {
           const previousChannel = authedSocket.data.voiceChannelId;
+          const previousServerId = voiceChannelServers.get(previousChannel);
           const previousParticipant = toVoiceParticipant(authedSocket);
           authedSocket.leave(`voice:${previousChannel}`);
           const previousBucket = voiceParticipants.get(previousChannel);
           previousBucket?.delete(authedSocket.id);
           if (previousBucket && previousBucket.size === 0) {
             voiceParticipants.delete(previousChannel);
+            voiceChannelServers.delete(previousChannel);
           }
           broadcastVoiceParticipants(io, previousChannel);
           emitVoiceEvent(io, previousChannel, 'leave', previousParticipant);
+          if (previousServerId) {
+            emitServerVoiceSnapshots(io, previousServerId);
+          }
         }
 
         authedSocket.data.isMicMuted = Boolean(isMicMuted);
@@ -545,9 +582,11 @@ export const setupSocket = (io: Server): void => {
         const participant = toVoiceParticipant(authedSocket);
         channelParticipants.set(authedSocket.id, participant);
         voiceParticipants.set(channelId, channelParticipants);
+        voiceChannelServers.set(channelId, targetServerId);
 
         broadcastVoiceParticipants(io, channelId);
         emitVoiceEvent(io, channelId, 'join', participant);
+        emitServerVoiceSnapshots(io, targetServerId);
       } catch (error) {
         authedSocket.emit('error:event', {
           scope: 'voice:join',
@@ -560,6 +599,7 @@ export const setupSocket = (io: Server): void => {
     authedSocket.on('voice:leave', () => {
       const voiceChannelId = authedSocket.data.voiceChannelId;
       if (!voiceChannelId) return;
+      const serverId = voiceChannelServers.get(voiceChannelId);
 
       const participant = toVoiceParticipant(authedSocket);
       authedSocket.leave(`voice:${voiceChannelId}`);
@@ -568,11 +608,15 @@ export const setupSocket = (io: Server): void => {
 
       if (channelParticipants && channelParticipants.size === 0) {
         voiceParticipants.delete(voiceChannelId);
+        voiceChannelServers.delete(voiceChannelId);
       }
 
       authedSocket.data.voiceChannelId = undefined;
       broadcastVoiceParticipants(io, voiceChannelId);
       emitVoiceEvent(io, voiceChannelId, 'leave', participant);
+      if (serverId) {
+        emitServerVoiceSnapshots(io, serverId);
+      }
     });
 
     authedSocket.on('voice:state', ({ isMicMuted, isOutputMuted }: { isMicMuted?: boolean; isOutputMuted?: boolean }) => {
@@ -607,6 +651,10 @@ export const setupSocket = (io: Server): void => {
         emitVoiceEvent(io, voiceChannelId, nextOutputMuted ? 'sound-muted' : 'sound-unmuted', currentParticipant);
       }
       broadcastVoiceParticipants(io, voiceChannelId);
+      const serverId = voiceChannelServers.get(voiceChannelId);
+      if (serverId) {
+        emitServerVoiceSnapshots(io, serverId);
+      }
     });
 
     authedSocket.on(
@@ -623,15 +671,20 @@ export const setupSocket = (io: Server): void => {
     authedSocket.on('disconnect', () => {
       const voiceChannelId = authedSocket.data.voiceChannelId;
       if (!voiceChannelId) return;
+      const serverId = voiceChannelServers.get(voiceChannelId);
 
       const participant = toVoiceParticipant(authedSocket);
       const channelParticipants = voiceParticipants.get(voiceChannelId);
       channelParticipants?.delete(authedSocket.id);
       if (channelParticipants && channelParticipants.size === 0) {
         voiceParticipants.delete(voiceChannelId);
+        voiceChannelServers.delete(voiceChannelId);
       }
       broadcastVoiceParticipants(io, voiceChannelId);
       emitVoiceEvent(io, voiceChannelId, 'disconnect', participant);
+      if (serverId) {
+        emitServerVoiceSnapshots(io, serverId);
+      }
     });
   });
 };
