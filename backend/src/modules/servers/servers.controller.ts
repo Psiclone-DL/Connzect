@@ -16,6 +16,74 @@ const serializeRole = <T extends { permissions: bigint }>(role: T) => ({
   permissions: role.permissions.toString()
 });
 
+const ensureSystemRolesForServer = async (serverId: string): Promise<void> => {
+  await prisma.$transaction(async (tx) => {
+    const server = await tx.server.findUnique({
+      where: { id: serverId },
+      select: { id: true, ownerId: true }
+    });
+    if (!server) {
+      return;
+    }
+
+    let serverOwnerRole = await tx.role.findFirst({
+      where: {
+        serverId,
+        isDefault: true,
+        name: SERVER_OWNER_ROLE_NAME
+      },
+      select: { id: true }
+    });
+
+    if (!serverOwnerRole) {
+      const highestPosition = await tx.role.findFirst({
+        where: { serverId },
+        orderBy: { position: 'desc' },
+        select: { position: true }
+      });
+
+      serverOwnerRole = await tx.role.create({
+        data: {
+          serverId,
+          name: SERVER_OWNER_ROLE_NAME,
+          position: (highestPosition?.position ?? 0) + 1,
+          isDefault: true,
+          permissions: ALL_PERMISSIONS
+        },
+        select: { id: true }
+      });
+    }
+
+    const ownerMember = await tx.serverMember.findUnique({
+      where: {
+        serverId_userId: {
+          serverId,
+          userId: server.ownerId
+        }
+      },
+      select: { id: true }
+    });
+
+    if (!ownerMember) {
+      return;
+    }
+
+    await tx.memberRole.upsert({
+      where: {
+        memberId_roleId: {
+          memberId: ownerMember.id,
+          roleId: serverOwnerRole.id
+        }
+      },
+      create: {
+        memberId: ownerMember.id,
+        roleId: serverOwnerRole.id
+      },
+      update: {}
+    });
+  });
+};
+
 export const createServer = async (req: Request, res: Response): Promise<void> => {
   if (!req.user) {
     throw new HttpError(401, 'Unauthorized');
@@ -120,6 +188,7 @@ export const getServer = async (req: Request, res: Response): Promise<void> => {
 
   const serverId = routeParam(req.params.serverId);
   await requireServerPermission(serverId, req.user.id, Permission.VIEW_CHANNEL);
+  await ensureSystemRolesForServer(serverId);
 
   const server = await prisma.server.findUnique({
     where: { id: serverId },

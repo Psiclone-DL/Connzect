@@ -3,7 +3,7 @@ import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../../config/prisma';
 import { HttpError } from '../../utils/httpError';
 import { routeParam } from '../../utils/params';
-import { Permission } from '../../utils/permissions';
+import { ALL_PERMISSIONS, Permission } from '../../utils/permissions';
 import { notifyServerMemberActivity } from '../servers/server-activity';
 import { requireServerPermission } from '../servers/server-access';
 
@@ -148,7 +148,7 @@ export const leaveServer = async (req: Request, res: Response): Promise<void> =>
 
     await prisma.$transaction(async (tx) => {
       if (nextOwnerMember) {
-        const serverOwnerRole = await tx.role.findFirst({
+        let serverOwnerRole = await tx.role.findFirst({
           where: {
             serverId,
             isDefault: true,
@@ -160,7 +160,24 @@ export const leaveServer = async (req: Request, res: Response): Promise<void> =>
         });
 
         if (!serverOwnerRole) {
-          throw new HttpError(500, 'Server Owner role missing');
+          const highestPosition = await tx.role.findFirst({
+            where: { serverId },
+            orderBy: { position: 'desc' },
+            select: { position: true }
+          });
+
+          serverOwnerRole = await tx.role.create({
+            data: {
+              serverId,
+              name: SERVER_OWNER_ROLE_NAME,
+              position: (highestPosition?.position ?? 0) + 1,
+              isDefault: true,
+              permissions: ALL_PERMISSIONS
+            },
+            select: {
+              id: true
+            }
+          });
         }
 
         await tx.server.update({
